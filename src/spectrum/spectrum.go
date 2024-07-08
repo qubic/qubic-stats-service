@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pkg/errors"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"os"
 	"time"
@@ -95,7 +96,7 @@ func ReadSpectrumFromFile(filePath string, spectrumSize int64) (*Spectrum, error
 	return &spectrum, nil
 }
 
-func LoadSpectrumData(spectrumDataFile string) (*Data, error) {
+func LoadSpectrumDataFromFile(spectrumDataFile string) (*Data, error) {
 
 	println("Loading spectrum data...")
 
@@ -140,6 +141,35 @@ func (d *Data) SaveSpectrumDataToFile(spectrumDataFile string) error {
 	}
 
 	return nil
+
+}
+
+func LoadSpectrumDataFromDatabase(dbClient *mongo.Client, database string, spectrumCollection string) (*Data, error) {
+
+	println("Loading spectrum data from database...")
+
+	collection := dbClient.Database(database).Collection(spectrumCollection)
+
+	cursor, err := collection.Find(context.Background(), bson.D{})
+	if err != nil {
+		return nil, errors.Wrap(err, "getting spectrum data from database")
+	}
+
+	var results []Data
+	var result Data
+	var latestTimestamp int64
+
+	if err = cursor.All(context.Background(), &results); err != nil {
+		return nil, errors.Wrap(err, "getting spectrum data from cursor")
+	}
+
+	for _, data := range results {
+		if data.Timestamp > latestTimestamp {
+			result = data
+		}
+	}
+
+	return &result, nil
 
 }
 

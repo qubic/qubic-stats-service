@@ -25,9 +25,8 @@ type Configuration struct {
 		OutputFile   string `conf:"default:spectrumData.json"`
 	}
 	Service struct {
-		SpectrumData   string `conf:"default:spectrumData.json"`
 		CoinGeckoToken string `cong:"default:XXXXXXXXXXXXXXXXXXXXX"`
-		ServerPort     string `conf:"default:80"`
+		WebPort        string `conf:"default:80"`
 	}
 	Mongo struct {
 		Username string `conf:"default:user"`
@@ -42,6 +41,7 @@ type Configuration struct {
 }
 
 func main() {
+
 	if err := run(); err != nil {
 		log.Fatalf("main: exited with error: %s\n", err.Error())
 	}
@@ -163,7 +163,10 @@ func run() error {
 		if err != nil {
 			return errors.Wrap(err, "saving spectrum data")
 		}
-		break
+
+		latestData, err := spectrum.LoadSpectrumDataFromDatabase(client, config.Mongo.Database, config.Mongo.SpectrumCollection)
+
+		fmt.Printf("Latest data: %d, %d %d", latestData.CirculatingSupply, latestData.ActiveAddresses, latestData.Timestamp)
 
 		break
 	}
