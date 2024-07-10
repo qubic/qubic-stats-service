@@ -169,6 +169,8 @@ func LoadSpectrumDataFromDatabase(dbClient *mongo.Client, database string, spect
 		}
 	}
 
+	println("Done.")
+
 	return &result, nil
 
 }

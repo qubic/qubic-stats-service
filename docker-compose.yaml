@@ -6,5 +6,21 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: user
       MONGO_INITDB_ROOT_PASSWORD: pass
+    networks:
+      - processor
     ports:
       - "27017:27017"
+
+  processor:
+    image: ghcr.io/qubic/frontend-processor:dev
+    container_name: frontend_processor
+    ports:
+      - "8080:8080"
+    networks:
+      - processor
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+networks:
+  processor:
