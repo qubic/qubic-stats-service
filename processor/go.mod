@@ -1,4 +1,4 @@
-module github.com/qubic/frontend-service-processor
+module github.com/qubic/qubic-stats-processor
 
 go 1.22.4
 

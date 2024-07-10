@@ -20,9 +20,9 @@ var EmptyAddress = [32]byte{
 }
 
 type Data struct {
-	CirculatingSupply int64 `json:"circulating_supply"`
-	ActiveAddresses   int   `json:"active_addresses"`
-	Timestamp         int64 `json:"unix_timestamp"`
+	CirculatingSupply int64
+	ActiveAddresses   int
+	Timestamp         int64
 }
 
 type Spectrum []Entity
