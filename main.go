@@ -6,10 +6,12 @@ import (
 	"github.com/ardanlabs/conf"
 	"github.com/pkg/errors"
 	"github.com/qubic/frontend-service-processor/src/db"
+	"github.com/qubic/frontend-service-processor/src/service"
 	"github.com/qubic/frontend-service-processor/src/spectrum"
 	"log"
 	"os"
 	"strconv"
+	"time"
 )
 
 const prefix = "QUBIC_FRONTEND_PROCESSOR"
@@ -25,8 +27,12 @@ type Configuration struct {
 		OutputFile   string `conf:"default:spectrumData.json"`
 	}
 	Service struct {
-		CoinGeckoToken string `cong:"default:XXXXXXXXXXXXXXXXXXXXX"`
-		WebPort        string `conf:"default:80"`
+		ArchiverUrl            string `conf:"default:https://testapi.qubic.org"`
+		ArchiverStatusPath     string `conf:"default:/v1/status"`
+		ArchiverLatestTickPath string `conf:"default:/v1/latestTick"`
+
+		CoinGeckoToken     string        `cong:"default:XXXXXXXXXXXXXXXXXXXXX"`
+		DataScrapeInterval time.Duration `conf:"default:1m"`
 	}
 	Mongo struct {
 		Username string `conf:"default:user"`
@@ -37,6 +43,7 @@ type Configuration struct {
 
 		Database           string `conf:"default:qubic_frontend"`
 		SpectrumCollection string `conf:"default:spectrum_data"`
+		DataCollection     string `conf:"default:general_data"`
 	}
 }
 
@@ -107,9 +114,34 @@ func run() error {
 
 	switch config.App.Mode {
 	case "service":
-		println("Web service")
+		println("Processor")
 
-		//var result bson.M
+		mongoConnection := db.Connection{
+			Username:          config.Mongo.Username,
+			Password:          config.Mongo.Password,
+			Hostname:          config.Mongo.Hostname,
+			Port:              config.Mongo.Port,
+			ConnectionOptions: config.Mongo.Options,
+		}
+
+		s := service.Service{
+			CoinGeckoToken:         config.Service.CoinGeckoToken,
+			ArchiverUrl:            config.Service.ArchiverUrl,
+			ArchiverStatusPath:     config.Service.ArchiverStatusPath,
+			ArchiverLatestTickPath: config.Service.ArchiverLatestTickPath,
+
+			DatabaseConnection: mongoConnection,
+			Database:           config.Mongo.Database,
+			SpectrumCollection: config.Mongo.SpectrumCollection,
+			DataCollection:     config.Mongo.DataCollection,
+
+			ScrapeInterval: config.Service.DataScrapeInterval,
+		}
+
+		err := s.RunService()
+		if err != nil {
+			return errors.Wrap(err, "running the web service")
+		}
 
 		break
 	case "spectrum_parser":
