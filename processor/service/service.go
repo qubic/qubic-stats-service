@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pkg/errors"
-	"github.com/qubic/frontend-service-processor/src/archiver"
-	"github.com/qubic/frontend-service-processor/src/db"
-	"github.com/qubic/frontend-service-processor/src/spectrum"
+	"github.com/qubic/qubic-stats-processor/archiver"
+	"github.com/qubic/qubic-stats-processor/db"
+	"github.com/qubic/qubic-stats-processor/spectrum"
 	"go.mongodb.org/mongo-driver/mongo"
 	"io"
 	"log"
@@ -33,19 +33,19 @@ type Service struct {
 }
 
 type Data struct {
-	Timestamp                int64   `json:"timestamp"`
-	Price                    float32 `json:"qubic_price"`
-	MarketCap                int64   `json:"market_cap"`
-	Epoch                    uint32  `json:"epoch"`
-	CurrentTick              uint32  `json:"current_tick"`
-	TicksInCurrentEpoch      uint32  `json:"ticks_in_current_epoch"`
-	EmptyTicksInCurrentEpoch uint32  `json:"empty_ticks_in_current_epoch"`
-	EpochTickQuality         float32 `json:"epoch_tick_quality"`
+	Timestamp                int64
+	Price                    float32
+	MarketCap                int64
+	Epoch                    uint32
+	CurrentTick              uint32
+	TicksInCurrentEpoch      uint32
+	EmptyTicksInCurrentEpoch uint32
+	EpochTickQuality         float32
 }
 
 func (s *Service) RunService() error {
 
-	println("Starting web service...")
+	println("Starting processor service...")
 
 	err := s.createDatabaseClient()
 	if err != nil {
@@ -59,9 +59,10 @@ func (s *Service) RunService() error {
 
 	println("Starting scrape loop...")
 
-	ticker := time.NewTicker(s.ScrapeInterval)
+	ticker := time.NewTicker(time.Second)
 
 	for range ticker.C {
+		ticker.Reset(s.ScrapeInterval)
 		println("Scraping for data... ")
 
 		data, err := s.scrapeData()
@@ -129,6 +130,7 @@ func (s *Service) scrapeData() (*Data, error) {
 	ticksThisEpoch := latestTick - epochStartingTick
 
 	serviceData := Data{
+		Timestamp:                time.Now().Unix(),
 		Price:                    price,
 		MarketCap:                marketCap,
 		Epoch:                    epoch,

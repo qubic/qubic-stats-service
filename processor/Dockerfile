@@ -2,7 +2,7 @@ FROM golang:1.22 AS builder
 ENV CGO_ENABLED=0
 
 WORKDIR /build
-COPY . /build
+COPY .. /build
 
 RUN go build -o "/build/frontend-service-processor"
 

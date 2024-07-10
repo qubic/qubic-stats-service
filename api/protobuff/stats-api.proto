@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package qubic.stats.api.pb;
+
+option go_package = "github.com/qubic/qubic-stats-api/protobuff/";
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+
+
+message QubicData {
+  int64 timestamp = 1;
+  float price = 2;
+  int64 market_cap = 3;
+  uint32 epoch = 4;
+  uint32 current_tick = 5;
+  uint32 ticks_in_current_epoch = 6;
+  uint32 empty_ticks_in_current_epoch = 7;
+  float epoch_tick_quality = 8;
+}
+
+message GetLatestDataResponse {
+  QubicData data = 1;
+}
+
+service StatsService {
+
+  rpc GetLatestData(google.protobuf.Empty) returns (GetLatestDataResponse){
+    option (google.api.http) = {
+      get: "/v1/latest"
+    };
+  };
+
+}

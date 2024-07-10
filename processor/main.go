@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"github.com/ardanlabs/conf"
 	"github.com/pkg/errors"
-	"github.com/qubic/frontend-service-processor/src/db"
-	"github.com/qubic/frontend-service-processor/src/service"
-	"github.com/qubic/frontend-service-processor/src/spectrum"
+	"github.com/qubic/qubic-stats-processor/db"
+	"github.com/qubic/qubic-stats-processor/service"
+	"github.com/qubic/qubic-stats-processor/spectrum"
 	"log"
 	"os"
 	"strconv"
 	"time"
 )
 
-const prefix = "QUBIC_FRONTEND_PROCESSOR"
+const prefix = "QUBIC_STATS_PROCESSOR"
 
 type Configuration struct {
 	App struct {

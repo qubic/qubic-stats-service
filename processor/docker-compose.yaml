@@ -14,8 +14,6 @@ services:
   processor:
     image: ghcr.io/qubic/frontend-processor:dev
     container_name: frontend_processor
-    ports:
-      - "8080:8080"
     networks:
       - processor
     depends_on:
