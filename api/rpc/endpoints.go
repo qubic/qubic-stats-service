@@ -6,9 +6,9 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func (s *Server) GetLatestData(ctx context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
+func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
 
-	qubicData := s.dataCache.getQubicData()
+	qubicData := s.cache.GetQubicData()
 
 	return &protobuff.GetLatestDataResponse{
 		Data: &protobuff.QubicData{

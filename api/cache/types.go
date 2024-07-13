@@ -1,4 +1,4 @@
-package types
+package cache
 
 type QubicData struct {
 	Timestamp                int64   `json:"timestamp"`

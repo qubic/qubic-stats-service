@@ -1,22 +1,21 @@
-package rpc
+package cache
 
 import (
-	"github.com/qubic/qubic-stats-api/types"
 	"sync"
 	"time"
 )
 
-type DataCache struct {
+type Cache struct {
 	mutexLock sync.RWMutex
 
-	qubicData           *types.QubicData
+	qubicData           *QubicData
 	lastQubicDataUpdate time.Time
 
-	spectrumData           *types.SpectrumData
+	spectrumData           *SpectrumData
 	lastSpectrumDataUpdate time.Time
 }
 
-func (c *DataCache) UpdateDataCache(spectrumData *types.SpectrumData, qubicData *types.QubicData) {
+func (c *Cache) UpdateDataCache(spectrumData *SpectrumData, qubicData *QubicData) {
 
 	c.mutexLock.Lock()
 	defer c.mutexLock.Unlock()
@@ -31,26 +30,25 @@ func (c *DataCache) UpdateDataCache(spectrumData *types.SpectrumData, qubicData 
 	}
 
 }
-
-func (c *DataCache) getQubicData() *types.QubicData {
+func (c *Cache) GetQubicData() *QubicData {
 	c.mutexLock.RLock()
 	defer c.mutexLock.RUnlock()
 	return c.qubicData
 
 }
-func (c *DataCache) getSpectrumData() *types.SpectrumData {
+func (c *Cache) GetSpectrumData() *SpectrumData {
 	c.mutexLock.RLock()
 	defer c.mutexLock.RUnlock()
 	return c.spectrumData
 
 }
-func (c *DataCache) getLastQubicDataUpdate() time.Time {
+func (c *Cache) GetLastQubicDataUpdate() time.Time {
 	c.mutexLock.RLock()
 	defer c.mutexLock.RUnlock()
 	return c.lastQubicDataUpdate
 
 }
-func (c *DataCache) getLastSpectrumDataUpdate() time.Time {
+func (c *Cache) GetLastSpectrumDataUpdate() time.Time {
 	c.mutexLock.RLock()
 	defer c.mutexLock.RUnlock()
 	return c.lastSpectrumDataUpdate
