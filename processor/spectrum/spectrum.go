@@ -12,12 +12,7 @@ import (
 	"time"
 )
 
-var EmptyAddress = [32]byte{
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-}
+var EmptyAddress [32]byte
 
 type Data struct {
 	CirculatingSupply int64
@@ -27,14 +22,14 @@ type Data struct {
 
 type Spectrum []Entity
 
-func (s Spectrum) CalculateSpectrumData() (*Data, error) {
+func CalculateSpectrumData(spectrum *Spectrum) (*Data, error) {
 
 	println("Calculating spectrum data...")
 
 	var circulatingSupply int64
 	var activeAddresses int
 
-	for index, entity := range s {
+	for index, entity := range *spectrum {
 		entityBalance, err := entity.GetBalance()
 		if err != nil {
 			return nil, errors.Wrapf(err, "getting balance of entity #%d", index)

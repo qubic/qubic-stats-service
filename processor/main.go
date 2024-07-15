@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"github.com/ardanlabs/conf"
 	"github.com/pkg/errors"
-	"github.com/qubic/qubic-stats-processor/db"
 	"github.com/qubic/qubic-stats-processor/service"
 	"github.com/qubic/qubic-stats-processor/spectrum"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 	"os"
 	"strconv"
@@ -27,9 +28,7 @@ type Configuration struct {
 		OutputFile   string `conf:"default:spectrumData.json"`
 	}
 	Service struct {
-		ArchiverUrl            string `conf:"default:https://testapi.qubic.org"`
-		ArchiverStatusPath     string `conf:"default:/v1/status"`
-		ArchiverLatestTickPath string `conf:"default:/v1/latestTick"`
+		ArchiverGrpcAddress string `conf:"default:localhost:8001"`
 
 		CoinGeckoToken     string        `cong:"default:XXXXXXXXXXXXXXXXXXXXX"`
 		DataScrapeInterval time.Duration `conf:"default:1m"`
@@ -116,7 +115,7 @@ func run() error {
 	case "service":
 		println("Processor")
 
-		mongoConnection := db.Connection{
+		mongoConnection := MongoConnection{
 			Username:          config.Mongo.Username,
 			Password:          config.Mongo.Password,
 			Hostname:          config.Mongo.Hostname,
@@ -124,21 +123,31 @@ func run() error {
 			ConnectionOptions: config.Mongo.Options,
 		}
 
-		s := service.Service{
-			CoinGeckoToken:         config.Service.CoinGeckoToken,
-			ArchiverUrl:            config.Service.ArchiverUrl,
-			ArchiverStatusPath:     config.Service.ArchiverStatusPath,
-			ArchiverLatestTickPath: config.Service.ArchiverLatestTickPath,
+		println("Connecting to database...")
+		client, err := createMongoClient(&mongoConnection)
+		if err != nil {
+			return errors.Wrap(err, "connecting to database")
+		}
 
-			DatabaseConnection: mongoConnection,
-			Database:           config.Mongo.Database,
-			SpectrumCollection: config.Mongo.SpectrumCollection,
-			DataCollection:     config.Mongo.DataCollection,
+		defer func() {
+			if err = client.Disconnect(context.Background()); err != nil {
+				log.Fatalf("main: exited with error: %s\n", err.Error())
+			}
+		}()
+
+		s := service.Service{
+			CoinGeckoToken:      config.Service.CoinGeckoToken,
+			ArchiverGrpcAddress: config.Service.ArchiverGrpcAddress,
+
+			MongoClient:              client,
+			MongoDatabase:            config.Mongo.Database,
+			MongoSpectrumCollection:  config.Mongo.SpectrumCollection,
+			MongoQubicDataCollection: config.Mongo.DataCollection,
 
 			ScrapeInterval: config.Service.DataScrapeInterval,
 		}
 
-		err := s.RunService()
+		err = s.RunService()
 		if err != nil {
 			return errors.Wrap(err, "running the web service")
 		}
@@ -158,7 +167,7 @@ func run() error {
 			return errors.Wrap(err, "loading spectrum from file")
 		}
 
-		spectrumData, err := s.CalculateSpectrumData()
+		spectrumData, err := spectrum.CalculateSpectrumData(s)
 		if err != nil {
 			return errors.Wrap(err, "calculating spectrum data")
 		}
@@ -171,7 +180,7 @@ func run() error {
 			break
 		}
 
-		mongoConnection := db.Connection{
+		mongoConnection := MongoConnection{
 			Username:          config.Mongo.Username,
 			Password:          config.Mongo.Password,
 			Hostname:          config.Mongo.Hostname,
@@ -180,7 +189,7 @@ func run() error {
 		}
 
 		println("Connecting to database...")
-		client, err := db.CreateClient(&mongoConnection)
+		client, err := createMongoClient(&mongoConnection)
 		if err != nil {
 			return errors.Wrap(err, "connecting to database")
 		}
@@ -204,4 +213,30 @@ func run() error {
 	}
 
 	return nil
+}
+
+type MongoConnection struct {
+	Username          string
+	Password          string
+	Hostname          string
+	Port              string
+	ConnectionOptions string
+}
+
+func (c *MongoConnection) AssembleConnectionURI() string {
+
+	return fmt.Sprintf("mongodb://%s:%s@%s:%s/%s", c.Username, c.Password, c.Hostname, c.Port, c.ConnectionOptions)
+}
+
+func createMongoClient(connection *MongoConnection) (*mongo.Client, error) {
+
+	serverApi := options.ServerAPI(options.ServerAPIVersion1)
+	opts := options.Client().ApplyURI(connection.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
+	client, err := mongo.Connect(context.Background(), opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "creating database client")
+	}
+
+	return client, nil
+
 }

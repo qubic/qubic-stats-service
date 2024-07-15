@@ -52,15 +52,15 @@ func run() error {
 	}
 
 	if err := conf.Parse(os.Args[1:], prefix, &config); err != nil {
-		switch err {
-		case conf.ErrHelpWanted:
+		switch {
+		case errors.Is(err, conf.ErrHelpWanted):
 			usage, err := conf.Usage(prefix, &config)
 			if err != nil {
 				return errors.Wrap(err, "generating config usage")
 			}
 			fmt.Println(usage)
 			return nil
-		case conf.ErrVersionWanted:
+		case errors.Is(err, conf.ErrVersionWanted):
 			version, err := conf.VersionString(prefix, &config)
 			if err != nil {
 				return errors.Wrap(err, "generating config version")

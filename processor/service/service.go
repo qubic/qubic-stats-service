@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pkg/errors"
-	"github.com/qubic/qubic-stats-processor/archiver"
-	"github.com/qubic/qubic-stats-processor/db"
+	"github.com/qubic/go-archiver/protobuff"
 	"github.com/qubic/qubic-stats-processor/spectrum"
 	"go.mongodb.org/mongo-driver/mongo"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"log"
 	"net/http"
@@ -16,19 +17,16 @@ import (
 )
 
 type Service struct {
-	CoinGeckoToken         string
-	ArchiverUrl            string
-	ArchiverStatusPath     string
-	ArchiverLatestTickPath string
+	CoinGeckoToken      string
+	ArchiverGrpcAddress string
 
-	DatabaseConnection db.Connection
-	Database           string
-	SpectrumCollection string
-	DataCollection     string
+	MongoClient              *mongo.Client
+	MongoDatabase            string
+	MongoSpectrumCollection  string
+	MongoQubicDataCollection string
 
 	ScrapeInterval time.Duration
 
-	dbClient     *mongo.Client
 	spectrumData *spectrum.Data // we keep this here for caching purposes
 }
 
@@ -47,18 +45,6 @@ func (s *Service) RunService() error {
 
 	println("Starting processor service...")
 
-	err := s.createDatabaseClient()
-	if err != nil {
-		return errors.Wrap(err, "creating database client")
-	}
-	defer func() {
-		if err = s.dbClient.Disconnect(context.Background()); err != nil {
-			log.Fatalf("service: exited with error: %s\n", err.Error())
-		}
-	}()
-
-	println("Starting scrape loop...")
-
 	ticker := time.NewTicker(time.Second)
 
 	for range ticker.C {
@@ -68,6 +54,7 @@ func (s *Service) RunService() error {
 		data, err := s.scrapeData()
 		if err != nil {
 			log.Printf("Failed to fetch data. Error: %v", err)
+			continue
 		}
 
 		println("Done scraping data.")
@@ -100,7 +87,7 @@ func (s *Service) scrapeData() (*Data, error) {
 		return nil, errors.Wrap(err, "fetching qubic price from coingecko")
 	}
 
-	spectrumData, err := spectrum.LoadSpectrumDataFromDatabase(s.dbClient, s.Database, s.SpectrumCollection)
+	spectrumData, err := spectrum.LoadSpectrumDataFromDatabase(s.MongoClient, s.MongoDatabase, s.MongoSpectrumCollection)
 	if err != nil {
 		if s.spectrumData == nil {
 			return nil, errors.Wrap(err, "fetching initial spectrum data from database")
@@ -110,14 +97,14 @@ func (s *Service) scrapeData() (*Data, error) {
 
 	marketCap := int64(float64(price) * float64(spectrumData.CirculatingSupply))
 
-	archiverStatus, err := fetchArchiverStatus(s.ArchiverUrl + s.ArchiverStatusPath)
+	archiverStatus, err := fetchArchiverStatus(s.ArchiverGrpcAddress)
 	if err != nil {
 		return nil, errors.Wrap(err, "fetching archiver status")
 	}
 
 	epoch := archiverStatus.LastProcessedTick.Epoch
 
-	latestTick, err := fetchLatestTick(s.ArchiverUrl + s.ArchiverLatestTickPath)
+	latestTick, err := fetchLatestTick(s.ArchiverGrpcAddress)
 	if err != nil {
 		return nil, errors.Wrap(err, "fetching latest tick")
 	}
@@ -145,7 +132,7 @@ func (s *Service) scrapeData() (*Data, error) {
 
 func (s *Service) saveData(data *Data) error {
 
-	collection := s.dbClient.Database(s.Database).Collection(s.DataCollection)
+	collection := s.MongoClient.Database(s.MongoDatabase).Collection(s.MongoQubicDataCollection)
 	_, err := collection.InsertOne(context.Background(), data)
 	if err != nil {
 		return errors.Wrap(err, "inserting data in collection")
@@ -154,62 +141,35 @@ func (s *Service) saveData(data *Data) error {
 	return nil
 }
 
-func fetchArchiverStatus(statusURL string) (*archiver.StatusResponse, error) {
+func fetchArchiverStatus(archiverGRPCAddress string) (*protobuff.GetStatusResponse, error) {
 
-	req, err := http.NewRequest("GET", statusURL, nil)
+	connection, err := grpc.NewClient(archiverGRPCAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil, errors.Wrap(err, "creating request")
+		return nil, errors.Wrap(err, "creating grpc connection")
 	}
-
-	res, err := http.DefaultClient.Do(req)
+	client := protobuff.NewArchiveServiceClient(connection)
+	status, err := client.GetStatus(context.Background(), nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "executing request")
+		return nil, errors.Wrap(err, "getting archiver status")
 	}
+	return status, nil
 
-	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, "reading request response")
-	}
-
-	var archiverStatus archiver.StatusResponse
-
-	err = json.Unmarshal(body, &archiverStatus)
-	if err != nil {
-		return nil, errors.Wrap(err, "unmarshalling archiver status")
-	}
-
-	return &archiverStatus, err
 }
 
-func fetchLatestTick(latestTickURL string) (uint32, error) {
-	req, err := http.NewRequest("GET", latestTickURL, nil)
+func fetchLatestTick(archiverGRPCAddress string) (uint32, error) {
+	connection, err := grpc.NewClient(archiverGRPCAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return 0, errors.Wrap(err, "creating request")
+		return 0, errors.Wrap(err, "creating grpc connection")
 	}
-
-	res, err := http.DefaultClient.Do(req)
+	client := protobuff.NewArchiveServiceClient(connection)
+	latestTick, err := client.GetLatestTick(context.Background(), nil)
 	if err != nil {
-		return 0, errors.Wrap(err, "executing request")
+		return 0, errors.Wrap(err, "getting latest tick")
 	}
-
-	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return 0, errors.Wrap(err, "reading request response")
-	}
-
-	var archiverStatus archiver.LatestTickResponse
-
-	err = json.Unmarshal(body, &archiverStatus)
-	if err != nil {
-		return 0, errors.Wrap(err, "unmarshalling archiver status")
-	}
-
-	return archiverStatus.LatestTick, err
+	return latestTick.LatestTick, nil
 }
 
-func getEpochStartingTick(archiverStatus *archiver.StatusResponse, epoch uint32) (uint32, error) {
+func getEpochStartingTick(archiverStatus *protobuff.GetStatusResponse, epoch uint32) (uint32, error) {
 	intervals := archiverStatus.ProcessedTickIntervalsPerEpoch
 
 	// we start from the bottom because this function will usually wil be used for the latest epoch
@@ -224,16 +184,6 @@ func getEpochStartingTick(archiverStatus *archiver.StatusResponse, epoch uint32)
 
 	return 0, errors.New("Could not find the specified epoch")
 
-}
-
-func (s *Service) createDatabaseClient() error {
-	println("Connecting to database...")
-	client, err := db.CreateClient(&s.DatabaseConnection)
-	if err != nil {
-		return errors.Wrap(err, "connecting to database")
-	}
-	s.dbClient = client
-	return nil
 }
 
 type coinGeckoResponse struct {

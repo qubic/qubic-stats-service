@@ -67,7 +67,8 @@ func (s *Service) Start() chan bool {
 
 			err := s.updateCache(updateSpectrum, true)
 			if err != nil {
-				fmt.Printf("Failed to update Cache. Error: %v", err)
+				fmt.Printf("Failed to update Cache. Error: %v\n", err)
+				continue
 			}
 			println("Done updating.")
 		}
