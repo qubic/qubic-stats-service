@@ -52,7 +52,7 @@ func (s *Service) Start() chan bool {
 
 	println("Starting Cache service...")
 	go func() {
-		ticker := time.NewTicker(time.Second)
+		ticker := time.NewTicker(time.Microsecond)
 		for range ticker.C {
 			ticker.Reset(s.cacheValidityDuration)
 			println("Updating...")
@@ -61,7 +61,7 @@ func (s *Service) Start() chan bool {
 			nextSpectrumUpdate := lastSpectrumDataUpdate.Add(s.spectrumValidityDuration)
 
 			updateSpectrum := false
-			if nextSpectrumUpdate.Compare(time.Now()) > 0 {
+			if nextSpectrumUpdate.Compare(time.Now()) > 0 || s.Cache.spectrumData == nil {
 				updateSpectrum = true
 			}
 
@@ -86,6 +86,7 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 	var err error
 
 	if updateQubicData {
+		println("Updated Qubic data")
 		qubicData, err = s.fetchQubicData()
 		if err != nil {
 			return errors.Wrap(err, "fetching qubic data")
@@ -94,6 +95,7 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 
 	if updateSpectrumData {
 		spectrumData, err = s.fetchSpectrumData()
+		println("Updated spectrum data")
 		if err != nil {
 			return errors.Wrap(err, "fetching spectrum data")
 		}

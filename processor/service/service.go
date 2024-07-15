@@ -39,6 +39,7 @@ type Data struct {
 	TicksInCurrentEpoch      uint32
 	EmptyTicksInCurrentEpoch uint32
 	EpochTickQuality         float32
+	BurnedQUs                uint64
 }
 
 func (s *Service) RunService() error {
@@ -67,6 +68,7 @@ func (s *Service) RunService() error {
 		fmt.Printf("    Ticks this Epoch: %d\n", data.TicksInCurrentEpoch)
 		fmt.Printf("    Empty Ticks this Epoch: %d\n", data.EmptyTicksInCurrentEpoch)
 		fmt.Printf("    Tick Quality: %f\n", data.EpochTickQuality)
+		fmt.Printf("    Burned QUs: %d\n", data.BurnedQUs)
 
 		println("Saving data to database...")
 		err = s.saveData(data)
@@ -116,6 +118,8 @@ func (s *Service) scrapeData() (*Data, error) {
 
 	ticksThisEpoch := latestTick - epochStartingTick
 
+	burnedQUs := (uint64(epoch) * uint64(1000000000000)) - uint64(spectrumData.CirculatingSupply)
+
 	serviceData := Data{
 		Timestamp:                time.Now().Unix(),
 		Price:                    price,
@@ -125,6 +129,7 @@ func (s *Service) scrapeData() (*Data, error) {
 		TicksInCurrentEpoch:      ticksThisEpoch,
 		EmptyTicksInCurrentEpoch: 0,
 		EpochTickQuality:         0,
+		BurnedQUs:                burnedQUs,
 	}
 
 	return &serviceData, nil
