@@ -21,9 +21,6 @@ jobs:
 
       - name: 'Build Inventory Image'
         run: |
-#          Processor
           docker build processor --tag ghcr.io/qubic/qubic-stats-processor:dev
-          docker push ghcr.io/qubic/qubic-stats-processor:dev
-#          API
           docker build api --tag ghcr.io/qubic/qubic-stats-api:dev
           docker push ghcr.io/qubic/qubic-stats-api:dev
