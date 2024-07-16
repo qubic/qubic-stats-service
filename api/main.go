@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/ardanlabs/conf"
 	"github.com/pkg/errors"
-	"github.com/qubic/qubic-stats-api/db"
+	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/rpc"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 	"os"
 	"time"
@@ -49,15 +52,15 @@ func run() error {
 	}
 
 	if err := conf.Parse(os.Args[1:], prefix, &config); err != nil {
-		switch err {
-		case conf.ErrHelpWanted:
+		switch {
+		case errors.Is(err, conf.ErrHelpWanted):
 			usage, err := conf.Usage(prefix, &config)
 			if err != nil {
 				return errors.Wrap(err, "generating config usage")
 			}
 			fmt.Println(usage)
 			return nil
-		case conf.ErrVersionWanted:
+		case errors.Is(err, conf.ErrVersionWanted):
 			version, err := conf.VersionString(prefix, &config)
 			if err != nil {
 				return errors.Wrap(err, "generating config version")
@@ -74,7 +77,7 @@ func run() error {
 	}
 	log.Printf("main: Config :\n%v\n", out)
 
-	mongoConnection := db.Connection{
+	mongoConnection := MongoConfiguration{
 		Username:          config.Mongo.Username,
 		Password:          config.Mongo.Password,
 		Hostname:          config.Mongo.Hostname,
@@ -82,23 +85,68 @@ func run() error {
 		ConnectionOptions: config.Mongo.Options,
 	}
 
-	configuration := rpc.ServerConfiguration{
-		HttpAddress:        config.Service.HttpAddress,
-		GrpcAddress:        config.Service.GrpcAddress,
-		Connection:         &mongoConnection,
-		Database:           config.Mongo.Database,
-		SpectrumCollection: config.Mongo.SpectrumCollection,
-		DataCollection:     config.Mongo.DataCollection,
-		//CacheStrategy:              config.Service.CachingStrategy,
-		CacheValidityDuration:      config.Service.CacheValidityDuration,
-		SpectrumDataUpdateInterval: config.Service.SpectrumDataUpdateInterval,
+	println("Connecting to database...")
+
+	dbClient, err := createMongoClient(&mongoConnection)
+	if err != nil {
+		return errors.Wrap(err, "creating database client")
 	}
 
-	server := rpc.NewServer(&configuration)
+	defer func() {
+		if err = dbClient.Disconnect(context.Background()); err != nil {
+			log.Fatalf("database: exited with error: %s\n", err.Error())
+		}
+	}()
+
+	serviceConfiguration := cache.ServiceConfiguration{
+		MongoDatabase:            config.Mongo.Database,
+		MongoSpectrumCollection:  config.Mongo.SpectrumCollection,
+		MongoQubicDataCollection: config.Mongo.DataCollection,
+
+		CacheValidityDuration:    config.Service.CacheValidityDuration,
+		SpectrumValidityDuration: config.Service.SpectrumDataUpdateInterval,
+	}
+
+	cacheService := cache.NewCacheService(&serviceConfiguration, dbClient)
+
+	exit := cacheService.Start()
+
+	server := rpc.NewServer(
+		config.Service.HttpAddress,
+		config.Service.GrpcAddress,
+		cacheService.Cache)
 	err = server.Start()
 	if err != nil {
 		return errors.Wrap(err, "starting the web server")
 	}
 
+	<-exit
+
 	return nil
+}
+
+type MongoConfiguration struct {
+	Username          string
+	Password          string
+	Hostname          string
+	Port              string
+	ConnectionOptions string
+}
+
+func (c *MongoConfiguration) AssembleConnectionURI() string {
+
+	return fmt.Sprintf("mongodb://%s:%s@%s:%s/%s", c.Username, c.Password, c.Hostname, c.Port, c.ConnectionOptions)
+}
+
+func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error) {
+
+	serverApi := options.ServerAPI(options.ServerAPIVersion1)
+	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
+	client, err := mongo.Connect(context.Background(), opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "creating database client")
+	}
+
+	return client, nil
+
 }

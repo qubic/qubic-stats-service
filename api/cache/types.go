@@ -1,4 +1,4 @@
-package types
+package cache
 
 type QubicData struct {
 	Timestamp                int64   `json:"timestamp"`
@@ -9,6 +9,7 @@ type QubicData struct {
 	TicksInCurrentEpoch      uint32  `json:"ticksInCurrentEpoch"`
 	EmptyTicksInCurrentEpoch uint32  `json:"emptyTicksInCurrentEpoch"`
 	EpochTickQuality         float32 `json:"epochTickQuality"`
+	BurnedQUs                uint64  `json:"burnedQUs"`
 }
 
 type SpectrumData struct {

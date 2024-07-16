@@ -12,12 +12,7 @@ import (
 	"time"
 )
 
-var EmptyAddress = [32]byte{
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-}
+var EmptyAddress [32]byte
 
 type Data struct {
 	CirculatingSupply int64
@@ -27,14 +22,14 @@ type Data struct {
 
 type Spectrum []Entity
 
-func (s Spectrum) CalculateSpectrumData() (*Data, error) {
+func CalculateSpectrumData(spectrum *Spectrum) (*Data, error) {
 
 	println("Calculating spectrum data...")
 
 	var circulatingSupply int64
 	var activeAddresses int
 
-	for index, entity := range s {
+	for index, entity := range *spectrum {
 		entityBalance, err := entity.GetBalance()
 		if err != nil {
 			return nil, errors.Wrapf(err, "getting balance of entity #%d", index)
@@ -96,7 +91,7 @@ func ReadSpectrumFromFile(filePath string, spectrumSize int64) (*Spectrum, error
 	return &spectrum, nil
 }
 
-func LoadSpectrumDataFromFile(spectrumDataFile string) (*Data, error) {
+/*func LoadSpectrumDataFromFile(spectrumDataFile string) (*Data, error) {
 
 	println("Loading spectrum data...")
 
@@ -118,7 +113,7 @@ func LoadSpectrumDataFromFile(spectrumDataFile string) (*Data, error) {
 
 	return &spectrumData, nil
 
-}
+}*/
 
 func (d *Data) SaveSpectrumDataToFile(spectrumDataFile string) error {
 
@@ -144,13 +139,13 @@ func (d *Data) SaveSpectrumDataToFile(spectrumDataFile string) error {
 
 }
 
-func LoadSpectrumDataFromDatabase(dbClient *mongo.Client, database string, spectrumCollection string) (*Data, error) {
+func LoadSpectrumDataFromDatabase(ctx context.Context, dbClient *mongo.Client, database string, spectrumCollection string) (*Data, error) {
 
 	println("Loading spectrum data from database...")
 
 	collection := dbClient.Database(database).Collection(spectrumCollection)
 
-	cursor, err := collection.Find(context.Background(), bson.D{})
+	cursor, err := collection.Find(ctx, bson.D{})
 	if err != nil {
 		return nil, errors.Wrap(err, "getting spectrum data from database")
 	}
@@ -159,7 +154,7 @@ func LoadSpectrumDataFromDatabase(dbClient *mongo.Client, database string, spect
 	var result Data
 	var latestTimestamp int64
 
-	if err = cursor.All(context.Background(), &results); err != nil {
+	if err = cursor.All(ctx, &results); err != nil {
 		return nil, errors.Wrap(err, "getting spectrum data from cursor")
 	}
 
@@ -175,13 +170,13 @@ func LoadSpectrumDataFromDatabase(dbClient *mongo.Client, database string, spect
 
 }
 
-func (d *Data) SaveSpectrumDataToDatabase(dbClient *mongo.Client, database string, spectrumCollection string) error {
+func (d *Data) SaveSpectrumDataToDatabase(ctx context.Context, dbClient *mongo.Client, database string, spectrumCollection string) error {
 
 	println("Saving spectrum data to database...")
 
 	collection := dbClient.Database(database).Collection(spectrumCollection)
 
-	_, err := collection.InsertOne(context.Background(), d)
+	_, err := collection.InsertOne(ctx, d)
 	if err != nil {
 		return errors.Wrap(err, "saving spectrum data to database")
 	}

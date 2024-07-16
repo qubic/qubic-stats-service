@@ -2,80 +2,51 @@ package rpc
 
 import (
 	"context"
-	"fmt"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/pkg/errors"
-	"github.com/qubic/qubic-stats-api/db"
+	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
-	"go.mongodb.org/mongo-driver/mongo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"log"
 	"net"
 	"net/http"
-	"time"
 )
-
-type ServerConfiguration struct {
-	HttpAddress string
-	GrpcAddress string
-
-	Connection         *db.Connection
-	Database           string
-	SpectrumCollection string
-	DataCollection     string
-
-	CacheStrategy              string
-	CacheValidityDuration      time.Duration
-	SpectrumDataUpdateInterval time.Duration
-}
 
 type Server struct {
 	protobuff.UnimplementedStatsServiceServer
-
 	httpAddress string
 	grpcAddress string
 
-	connection         *db.Connection
-	database           string
-	spectrumCollection string
-	dataCollection     string
+	cache *cache.Cache
+}
 
-	dbClient *mongo.Client
+func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
 
-	dataCache                  DataCache
-	cachingStrategy            string
-	cacheValidityDuration      time.Duration
-	spectrumDataUpdateInterval time.Duration
+	qubicData := s.cache.GetQubicData()
+	spectrumData := s.cache.GetSpectrumData()
+
+	return &protobuff.GetLatestDataResponse{
+		Data: &protobuff.QubicData{
+			Timestamp:                qubicData.Timestamp,
+			Price:                    qubicData.Price,
+			CirculatingSupply:        spectrumData.CirculatingSupply,
+			ActiveAddresses:          int32(spectrumData.ActiveAddresses),
+			MarketCap:                qubicData.MarketCap,
+			Epoch:                    qubicData.Epoch,
+			CurrentTick:              qubicData.CurrentTick,
+			TicksInCurrentEpoch:      qubicData.TicksInCurrentEpoch,
+			EmptyTicksInCurrentEpoch: qubicData.EmptyTicksInCurrentEpoch,
+			EpochTickQuality:         qubicData.EpochTickQuality,
+			BurnedQus:                qubicData.BurnedQUs,
+		},
+	}, nil
+
 }
 
 func (s *Server) Start() error {
-
-	println("Starting Web Service...")
-
-	//fmt.Printf("Caching strategy: %s\n", s.cachingStrategy)
-	fmt.Printf("Cache validity duration: %v\n", s.cacheValidityDuration)
-
-	println("Connecting to database...")
-	err := s.createDatabaseClient()
-	if err != nil {
-		return errors.Wrap(err, "creating database client")
-	}
-	defer func() {
-		if err = s.dbClient.Disconnect(context.Background()); err != nil {
-			log.Fatalf("service: exited with error: %s\n", err.Error())
-		}
-	}()
-
-	println("Connected to database.")
-
-	println("Fetching initial data...")
-	err = s.updateCache(true, true)
-	if err != nil {
-		return errors.Wrap(err, "initializing cache")
-	}
 
 	println("Starting GRPC server...")
 	srv := grpc.NewServer(
@@ -124,23 +95,14 @@ func (s *Server) Start() error {
 		}()
 	}
 
-	exit := s.startUpdateService()
-	<-exit
-
 	return nil
 
 }
 
-func NewServer(configuration *ServerConfiguration) *Server {
+func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache) *Server {
 	return &Server{
-		httpAddress:                configuration.HttpAddress,
-		grpcAddress:                configuration.GrpcAddress,
-		connection:                 configuration.Connection,
-		database:                   configuration.Database,
-		spectrumCollection:         configuration.SpectrumCollection,
-		dataCollection:             configuration.DataCollection,
-		cachingStrategy:            configuration.CacheStrategy,
-		cacheValidityDuration:      configuration.CacheValidityDuration,
-		spectrumDataUpdateInterval: configuration.SpectrumDataUpdateInterval,
+		httpAddress: httpAddress,
+		grpcAddress: grpcAddress,
+		cache:       cache,
 	}
 }
