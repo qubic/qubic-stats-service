@@ -32,6 +32,7 @@ type Configuration struct {
 
 		CoinGeckoToken     string        `cong:"default:XXXXXXXXXXXXXXXXXXXXX"`
 		DataScrapeInterval time.Duration `conf:"default:1m"`
+		DataScrapeTimeout  time.Duration `conf:"default:5s"`
 	}
 	Mongo struct {
 		Username string `conf:"default:user"`
@@ -115,7 +116,7 @@ func run() error {
 	case "service":
 		println("Processor")
 
-		mongoConnection := MongoConnection{
+		mongoConnection := MongoConfiguration{
 			Username:          config.Mongo.Username,
 			Password:          config.Mongo.Password,
 			Hostname:          config.Mongo.Hostname,
@@ -145,6 +146,7 @@ func run() error {
 			MongoQubicDataCollection: config.Mongo.DataCollection,
 
 			ScrapeInterval: config.Service.DataScrapeInterval,
+			ScrapeTimeout:  config.Service.DataScrapeTimeout,
 		}
 
 		err = s.RunService()
@@ -180,7 +182,7 @@ func run() error {
 			break
 		}
 
-		mongoConnection := MongoConnection{
+		mongoConnection := MongoConfiguration{
 			Username:          config.Mongo.Username,
 			Password:          config.Mongo.Password,
 			Hostname:          config.Mongo.Hostname,
@@ -200,12 +202,12 @@ func run() error {
 			}
 		}()
 
-		err = spectrumData.SaveSpectrumDataToDatabase(client, config.Mongo.Database, config.Mongo.SpectrumCollection)
+		err = spectrumData.SaveSpectrumDataToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
 		if err != nil {
 			return errors.Wrap(err, "saving spectrum data")
 		}
 
-		latestData, err := spectrum.LoadSpectrumDataFromDatabase(client, config.Mongo.Database, config.Mongo.SpectrumCollection)
+		latestData, err := spectrum.LoadSpectrumDataFromDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
 
 		fmt.Printf("Latest data: %d, %d %d", latestData.CirculatingSupply, latestData.ActiveAddresses, latestData.Timestamp)
 
@@ -215,7 +217,7 @@ func run() error {
 	return nil
 }
 
-type MongoConnection struct {
+type MongoConfiguration struct {
 	Username          string
 	Password          string
 	Hostname          string
@@ -223,15 +225,15 @@ type MongoConnection struct {
 	ConnectionOptions string
 }
 
-func (c *MongoConnection) AssembleConnectionURI() string {
+func (c *MongoConfiguration) AssembleConnectionURI() string {
 
 	return fmt.Sprintf("mongodb://%s:%s@%s:%s/%s", c.Username, c.Password, c.Hostname, c.Port, c.ConnectionOptions)
 }
 
-func createMongoClient(connection *MongoConnection) (*mongo.Client, error) {
+func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error) {
 
 	serverApi := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(connection.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
+	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
 	client, err := mongo.Connect(context.Background(), opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating database client")

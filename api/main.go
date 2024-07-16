@@ -77,7 +77,7 @@ func run() error {
 	}
 	log.Printf("main: Config :\n%v\n", out)
 
-	mongoConnection := MongoConnection{
+	mongoConnection := MongoConfiguration{
 		Username:          config.Mongo.Username,
 		Password:          config.Mongo.Password,
 		Hostname:          config.Mongo.Hostname,
@@ -125,7 +125,7 @@ func run() error {
 	return nil
 }
 
-type MongoConnection struct {
+type MongoConfiguration struct {
 	Username          string
 	Password          string
 	Hostname          string
@@ -133,15 +133,15 @@ type MongoConnection struct {
 	ConnectionOptions string
 }
 
-func (c *MongoConnection) AssembleConnectionURI() string {
+func (c *MongoConfiguration) AssembleConnectionURI() string {
 
 	return fmt.Sprintf("mongodb://%s:%s@%s:%s/%s", c.Username, c.Password, c.Hostname, c.Port, c.ConnectionOptions)
 }
 
-func createMongoClient(connection *MongoConnection) (*mongo.Client, error) {
+func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error) {
 
 	serverApi := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(connection.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
+	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
 	client, err := mongo.Connect(context.Background(), opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating database client")

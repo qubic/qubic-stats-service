@@ -47,9 +47,7 @@ func NewCacheService(configuration *ServiceConfiguration, mongoClient *mongo.Cli
 }
 
 func (s *Service) Start() chan bool {
-
 	exit := make(chan bool)
-
 	println("Starting Cache service...")
 	go func() {
 		ticker := time.NewTicker(time.Microsecond)
@@ -61,7 +59,7 @@ func (s *Service) Start() chan bool {
 			nextSpectrumUpdate := lastSpectrumDataUpdate.Add(s.spectrumValidityDuration)
 
 			updateSpectrum := false
-			if nextSpectrumUpdate.Compare(time.Now()) > 0 || s.Cache.spectrumData == nil {
+			if nextSpectrumUpdate.Compare(time.Now()) > 0 || s.Cache.spectrumData.CirculatingSupply == 0 {
 				updateSpectrum = true
 			}
 
@@ -76,13 +74,11 @@ func (s *Service) Start() chan bool {
 	}()
 
 	return exit
-
 }
 
 func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) error {
-
-	var qubicData *QubicData
-	var spectrumData *SpectrumData
+	var qubicData QubicData
+	var spectrumData SpectrumData
 	var err error
 
 	if updateQubicData {
@@ -106,7 +102,7 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 	return nil
 }
 
-func (s *Service) fetchSpectrumData() (*SpectrumData, error) {
+func (s *Service) fetchSpectrumData() (SpectrumData, error) {
 
 	collection := s.mongoClient.Database(s.mongoDatabase).Collection(s.mongoSpectrumCollection)
 
@@ -117,13 +113,13 @@ func (s *Service) fetchSpectrumData() (*SpectrumData, error) {
 	result := collection.FindOne(context.Background(), bson.D{}, opts)
 	err := result.Decode(&spectrumData)
 	if err != nil {
-		return nil, errors.Wrap(err, "decoding database response")
+		return SpectrumData{}, errors.Wrap(err, "decoding database response")
 	}
 
-	return &spectrumData, nil
+	return spectrumData, nil
 }
 
-func (s *Service) fetchQubicData() (*QubicData, error) {
+func (s *Service) fetchQubicData() (QubicData, error) {
 	collection := s.mongoClient.Database(s.mongoDatabase).Collection(s.mongoQubicDataCollection)
 
 	var qubicData QubicData
@@ -133,8 +129,8 @@ func (s *Service) fetchQubicData() (*QubicData, error) {
 	result := collection.FindOne(context.Background(), bson.D{}, opts)
 	err := result.Decode(&qubicData)
 	if err != nil {
-		return nil, errors.Wrap(err, "decoding database response")
+		return QubicData{}, errors.Wrap(err, "decoding database response")
 	}
 
-	return &qubicData, nil
+	return qubicData, nil
 }

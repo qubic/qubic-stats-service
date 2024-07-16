@@ -26,6 +26,7 @@ type Service struct {
 	MongoQubicDataCollection string
 
 	ScrapeInterval time.Duration
+	ScrapeTimeout  time.Duration
 
 	spectrumData *spectrum.Data // we keep this here for caching purposes
 }
@@ -76,44 +77,58 @@ func (s *Service) RunService() error {
 			log.Printf("Failed to save the data. Error: %v", err)
 		}
 		println("Done saving.")
-
 	}
 
 	return nil
 }
 
-func (s *Service) scrapeData() (*Data, error) {
+func (s *Service) scrapeData() (Data, error) {
 
-	price, err := FetchCoinGeckoPrice(s.CoinGeckoToken)
+	ctx, cancel := context.WithTimeout(context.Background(), s.ScrapeTimeout)
+	defer cancel()
+
+	connection, err := grpc.NewClient(s.ArchiverGrpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil, errors.Wrap(err, "fetching qubic price from coingecko")
+		return Data{}, errors.Wrap(err, "creating grpc connection")
+	}
+	defer func(connection *grpc.ClientConn) {
+		err := connection.Close()
+		if err != nil {
+			fmt.Printf("failed to close grpc connection")
+		}
+	}(connection)
+	client := protobuff.NewArchiveServiceClient(connection)
+
+	price, err := FetchCoinGeckoPrice(ctx, s.CoinGeckoToken)
+	if err != nil {
+		return Data{}, errors.Wrap(err, "fetching qubic price from coingecko")
 	}
 
-	spectrumData, err := spectrum.LoadSpectrumDataFromDatabase(s.MongoClient, s.MongoDatabase, s.MongoSpectrumCollection)
+	spectrumData, err := spectrum.LoadSpectrumDataFromDatabase(ctx, s.MongoClient, s.MongoDatabase, s.MongoSpectrumCollection)
 	if err != nil {
 		if s.spectrumData == nil {
-			return nil, errors.Wrap(err, "fetching initial spectrum data from database")
+			return Data{}, errors.Wrap(err, "fetching initial spectrum data from database")
 		}
 		fmt.Printf("Failed to update spectrum data: %v", err)
 	}
 
 	marketCap := int64(float64(price) * float64(spectrumData.CirculatingSupply))
 
-	archiverStatus, err := fetchArchiverStatus(s.ArchiverGrpcAddress)
+	archiverStatus, err := fetchArchiverStatus(client)
 	if err != nil {
-		return nil, errors.Wrap(err, "fetching archiver status")
+		return Data{}, errors.Wrap(err, "fetching archiver status")
 	}
 
 	epoch := archiverStatus.LastProcessedTick.Epoch
 
-	latestTick, err := fetchLatestTick(s.ArchiverGrpcAddress)
+	latestTick, err := fetchLatestTick(client)
 	if err != nil {
-		return nil, errors.Wrap(err, "fetching latest tick")
+		return Data{}, errors.Wrap(err, "fetching latest tick")
 	}
 
 	epochStartingTick, err := getEpochStartingTick(archiverStatus, epoch)
 	if err != nil {
-		return nil, errors.Wrap(err, "getting starting tick for current interval")
+		return Data{}, errors.Wrap(err, "getting starting tick for current interval")
 	}
 
 	ticksThisEpoch := latestTick - epochStartingTick
@@ -132,10 +147,10 @@ func (s *Service) scrapeData() (*Data, error) {
 		BurnedQUs:                burnedQUs,
 	}
 
-	return &serviceData, nil
+	return serviceData, nil
 }
 
-func (s *Service) saveData(data *Data) error {
+func (s *Service) saveData(data Data) error {
 
 	collection := s.MongoClient.Database(s.MongoDatabase).Collection(s.MongoQubicDataCollection)
 	_, err := collection.InsertOne(context.Background(), data)
@@ -146,13 +161,8 @@ func (s *Service) saveData(data *Data) error {
 	return nil
 }
 
-func fetchArchiverStatus(archiverGRPCAddress string) (*protobuff.GetStatusResponse, error) {
+func fetchArchiverStatus(client protobuff.ArchiveServiceClient) (*protobuff.GetStatusResponse, error) {
 
-	connection, err := grpc.NewClient(archiverGRPCAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, errors.Wrap(err, "creating grpc connection")
-	}
-	client := protobuff.NewArchiveServiceClient(connection)
 	status, err := client.GetStatus(context.Background(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting archiver status")
@@ -161,12 +171,7 @@ func fetchArchiverStatus(archiverGRPCAddress string) (*protobuff.GetStatusRespon
 
 }
 
-func fetchLatestTick(archiverGRPCAddress string) (uint32, error) {
-	connection, err := grpc.NewClient(archiverGRPCAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return 0, errors.Wrap(err, "creating grpc connection")
-	}
-	client := protobuff.NewArchiveServiceClient(connection)
+func fetchLatestTick(client protobuff.ArchiveServiceClient) (uint32, error) {
 	latestTick, err := client.GetLatestTick(context.Background(), nil)
 	if err != nil {
 		return 0, errors.Wrap(err, "getting latest tick")
@@ -197,11 +202,11 @@ type coinGeckoResponse struct {
 	} `json:"qubic-network"`
 }
 
-func FetchCoinGeckoPrice(token string) (float32, error) {
+func FetchCoinGeckoPrice(ctx context.Context, token string) (float32, error) {
 
 	url := "https://api.coingecko.com/api/v3/simple/price?ids=qubic-network&vs_currencies=usd&precision=9"
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return 0, errors.Wrap(err, "creating request")
 	}
@@ -213,15 +218,14 @@ func FetchCoinGeckoPrice(token string) (float32, error) {
 	if err != nil {
 		return 0, errors.Wrap(err, "executing request")
 	}
-
 	defer res.Body.Close()
+
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return 0, errors.Wrap(err, "reading request response")
 	}
 
 	var response coinGeckoResponse
-
 	err = json.Unmarshal(body, &response)
 	if err != nil {
 		return 0, errors.Wrap(err, "unmarshalling response")
