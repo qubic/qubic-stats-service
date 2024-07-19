@@ -3,6 +3,8 @@ services:
     image: mongo
     container_name: "mongo-db"
     restart: unless-stopped
+    volumes:
+      - ./mongo-data:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: user
       MONGO_INITDB_ROOT_PASSWORD: pass
