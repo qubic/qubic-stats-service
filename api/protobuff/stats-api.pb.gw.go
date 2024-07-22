@@ -64,7 +64,7 @@ func RegisterStatsServiceHandlerServer(ctx context.Context, mux *runtime.ServeMu
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
 		var err error
 		var annotatedContext context.Context
-		annotatedContext, err = runtime.AnnotateIncomingContext(ctx, mux, req, "/qubic.stats.api.pb.StatsService/GetLatestData", runtime.WithHTTPPathPattern("/v1/stats-latest"))
+		annotatedContext, err = runtime.AnnotateIncomingContext(ctx, mux, req, "/qubic.stats.api.pb.StatsService/GetLatestData", runtime.WithHTTPPathPattern("/v1/latest"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -128,7 +128,7 @@ func RegisterStatsServiceHandlerClient(ctx context.Context, mux *runtime.ServeMu
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
 		var err error
 		var annotatedContext context.Context
-		annotatedContext, err = runtime.AnnotateContext(ctx, mux, req, "/qubic.stats.api.pb.StatsService/GetLatestData", runtime.WithHTTPPathPattern("/v1/stats-latest"))
+		annotatedContext, err = runtime.AnnotateContext(ctx, mux, req, "/qubic.stats.api.pb.StatsService/GetLatestData", runtime.WithHTTPPathPattern("/v1/latest"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -148,7 +148,7 @@ func RegisterStatsServiceHandlerClient(ctx context.Context, mux *runtime.ServeMu
 }
 
 var (
-	pattern_StatsService_GetLatestData_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"v1", "stats-latest"}, ""))
+	pattern_StatsService_GetLatestData_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"v1", "latest"}, ""))
 )
 
 var (

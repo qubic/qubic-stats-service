@@ -29,7 +29,7 @@ service StatsService {
 
   rpc GetLatestData(google.protobuf.Empty) returns (GetLatestDataResponse){
     option (google.api.http) = {
-      get: "/v1/stats-latest"
+      get: "/v1/latest"
     };
   };
 
