@@ -135,6 +135,12 @@ func (s *Service) scrapeData() (Data, error) {
 
 	burnedQUs := (uint64(epoch) * uint64(1000000000000)) - uint64(spectrumData.CirculatingSupply)
 
+	emptyTickCount := archiverStatus.EmptyTicksPerEpoch[epoch]
+
+	goodTicks := ticksThisEpoch - emptyTickCount
+
+	var tickQuality = (float32(goodTicks) / float32(ticksThisEpoch)) * 100
+
 	serviceData := Data{
 		Timestamp:                time.Now().Unix(),
 		Price:                    price,
@@ -142,8 +148,8 @@ func (s *Service) scrapeData() (Data, error) {
 		Epoch:                    epoch,
 		CurrentTick:              latestTick,
 		TicksInCurrentEpoch:      ticksThisEpoch,
-		EmptyTicksInCurrentEpoch: 0,
-		EpochTickQuality:         0,
+		EmptyTicksInCurrentEpoch: emptyTickCount,
+		EpochTickQuality:         tickQuality,
 		BurnedQUs:                burnedQUs,
 	}
 

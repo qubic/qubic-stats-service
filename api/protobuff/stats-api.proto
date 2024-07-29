@@ -21,15 +21,53 @@ message QubicData {
   uint64 burned_qus = 11;
 }
 
+// Pagination
+
+message Pagination {
+  int32 total_records = 1;
+  int32 current_page = 2;
+  int32 total_pages = 3;
+}
+
+// Rich list types
+
+message RichListEntity {
+  string identity = 1;
+  int64 balance = 2;
+}
+
+message RichList {
+  repeated RichListEntity entities = 1;
+}
+
+message GetRichListSliceRequest {
+  string epoch = 1;
+  int32 page = 2;
+
+}
+message GetRichListSliceResponse {
+  Pagination pagination = 1;
+  RichList rich_list = 2;
+}
+
+
+//Latest data
+
 message GetLatestDataResponse {
   QubicData data = 1;
 }
 
 service StatsService {
 
-  rpc GetLatestData(google.protobuf.Empty) returns (GetLatestDataResponse){
+  rpc GetLatestData(google.protobuf.Empty) returns (GetLatestDataResponse) {
     option (google.api.http) = {
-      get: "/v1/latest"
+      get: "/v1/latest-stats"
+    };
+  };
+
+  rpc GetRichListSlice(GetRichListSliceRequest) returns (GetRichListSliceResponse) {
+    option (google.api.http) = {
+      get: "/v1/epochs/{epoch}/rich-list"
     };
   };
 

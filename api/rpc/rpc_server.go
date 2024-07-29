@@ -5,9 +5,14 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"log"
@@ -21,6 +26,12 @@ type Server struct {
 	grpcAddress string
 
 	cache *cache.Cache
+
+	dbClient                *mongo.Client
+	mongoDatabase           string
+	mongoRichListCollection string
+
+	richListPageSize int32
 }
 
 func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
@@ -41,6 +52,64 @@ func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.
 			EmptyTicksInCurrentEpoch: qubicData.EmptyTicksInCurrentEpoch,
 			EpochTickQuality:         qubicData.EpochTickQuality,
 			BurnedQus:                qubicData.BurnedQUs,
+		},
+	}, nil
+
+}
+
+func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRichListSliceRequest) (*protobuff.GetRichListSliceResponse, error) {
+
+	page := request.Page
+
+	if page == 0 {
+		page = 1
+	}
+
+	data := s.cache.GetEpochPaginationData(request.Epoch)
+
+	if data == cache.EmptyPaginationData {
+		return nil, status.Errorf(codes.NotFound, "could not find the rich list for the specified epoch")
+	}
+
+	lastPage := data.RichListPageCount
+	totalRecords := data.RichListLength
+
+	if page <= 0 || page > lastPage {
+		return nil, status.Errorf(codes.Internal, "cannot find specified page. last page: %d", lastPage)
+	}
+	start := (page - 1) * s.richListPageSize
+
+	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + request.Epoch)
+	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(s.richListPageSize)).SetSort(bson.D{{"balance", -1}})
+
+	cursor, err := collection.Find(ctx, bson.D{{}}, findOptions)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "cannot get rich list slice from the database. error: %v", err)
+	}
+
+	var results cache.RichList
+	err = cursor.All(ctx, &results)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to unmarshal database response. error: %v", err)
+	}
+
+	var list []*protobuff.RichListEntity
+
+	for _, entity := range results {
+		list = append(list, &protobuff.RichListEntity{
+			Identity: entity.Identity,
+			Balance:  entity.Balance,
+		})
+	}
+
+	return &protobuff.GetRichListSliceResponse{
+		Pagination: &protobuff.Pagination{
+			CurrentPage:  page,
+			TotalPages:   lastPage,
+			TotalRecords: totalRecords,
+		},
+		RichList: &protobuff.RichList{
+			Entities: list,
 		},
 	}, nil
 
@@ -99,10 +168,14 @@ func (s *Server) Start() error {
 
 }
 
-func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache) *Server {
+func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, richListCollection string, richListPageSize int32) *Server {
 	return &Server{
-		httpAddress: httpAddress,
-		grpcAddress: grpcAddress,
-		cache:       cache,
+		httpAddress:             httpAddress,
+		grpcAddress:             grpcAddress,
+		cache:                   cache,
+		dbClient:                dbClient,
+		mongoDatabase:           database,
+		mongoRichListCollection: richListCollection,
+		richListPageSize:        richListPageSize,
 	}
 }

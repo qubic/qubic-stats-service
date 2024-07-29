@@ -2,13 +2,16 @@ package spectrum
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/pkg/errors"
+	"github.com/qubic/go-node-connector/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -20,14 +23,21 @@ type Data struct {
 	Timestamp         int64
 }
 
+type Results struct {
+	Data Data
+	List RichList
+}
+
 type Spectrum []Entity
 
-func CalculateSpectrumData(spectrum *Spectrum) (*Data, error) {
+func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 
 	println("Calculating spectrum data...")
 
 	var circulatingSupply int64
 	var activeAddresses int
+
+	var richList RichList
 
 	for index, entity := range *spectrum {
 		entityBalance, err := entity.GetBalance()
@@ -38,18 +48,38 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Data, error) {
 
 		if entity.publicKey != EmptyAddress {
 			activeAddresses += 1
+
+			var identity types.Identity
+			identity, err := identity.FromPubKey(entity.publicKey, false)
+			if err != nil {
+				return nil, errors.Wrap(err, "getting identity for spectrum entity")
+			}
+
+			richListEntity := RichListEntity{
+				Balance:  entityBalance,
+				Identity: identity.String(),
+			}
+			richList = append(richList, richListEntity)
+			fmt.Printf("DATA: %v\n", richListEntity)
 		}
 
 	}
+
+	slices.SortFunc(richList, func(a, b RichListEntity) int {
+		return cmp.Compare(a.Balance, b.Balance)
+	})
 
 	println("Done.")
 	fmt.Printf("Circulating supply: %d\n", circulatingSupply)
 	fmt.Printf("Active addresses: %d\n", activeAddresses)
 
-	return &Data{
-		CirculatingSupply: circulatingSupply,
-		ActiveAddresses:   activeAddresses,
-		Timestamp:         time.Now().Unix(),
+	return &Results{
+		Data: Data{
+			CirculatingSupply: circulatingSupply,
+			ActiveAddresses:   activeAddresses,
+			Timestamp:         time.Now().Unix(),
+		},
+		List: richList,
 	}, nil
 }
 
@@ -179,6 +209,26 @@ func (d *Data) SaveSpectrumDataToDatabase(ctx context.Context, dbClient *mongo.C
 	_, err := collection.InsertOne(ctx, d)
 	if err != nil {
 		return errors.Wrap(err, "saving spectrum data to database")
+	}
+
+	println("Done.")
+
+	return nil
+}
+
+func SaveRichListToDatabase(ctx context.Context, dbClient *mongo.Client, database string, richListCollection string, richList RichList) error {
+	println("Saving rich list to database...")
+
+	collection := dbClient.Database(database).Collection(richListCollection)
+
+	list := make([]interface{}, len(richList))
+	for index, value := range richList {
+		list[index] = value
+	}
+
+	_, err := collection.InsertMany(ctx, list)
+	if err != nil {
+		return errors.Wrap(err, "saving rich list to database")
 	}
 
 	println("Done.")

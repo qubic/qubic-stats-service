@@ -3,6 +3,8 @@ services:
     image: mongo
     container_name: "mongo-db"
     restart: unless-stopped
+    volumes:
+      - ./mongo-data:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: user
       MONGO_INITDB_ROOT_PASSWORD: pass
@@ -11,31 +13,31 @@ services:
     ports:
       - "27017:27017"
 
-  processor:
-    image: qubic-stats-processor
-    container_name: "stats-processor"
-    environment:
-      QUBIC_STATS_PROCESSOR_MONGO_HOSTNAME: "mongo"
-      QUBIC_STATS_PROCESSOR_SERVICE_ARCHIVER_GRPC_ADDRESS: "host.docker.internal:8001"
-    networks:
-      - qubic-stats
-    depends_on:
-      - mongo
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+#  processor:
+#    image: qubic-stats-processor
+#    container_name: "stats-processor"
+#    environment:
+#      QUBIC_STATS_PROCESSOR_MONGO_HOSTNAME: "mongo"
+#      QUBIC_STATS_PROCESSOR_SERVICE_ARCHIVER_GRPC_ADDRESS: "host.docker.internal:8001"
+#    networks:
+#      - qubic-stats
+#    depends_on:
+#      - mongo
+#    extra_hosts:
+#      - "host.docker.internal:host-gateway"
 
-  api:
-    image: qubic-stats-api
-    container_name: "stats-api"
-    environment:
-      QUBIC_STATS_API_MONGO_HOSTNAME: "mongo"
-    networks:
-      - qubic-stats
-    ports:
-      - "8081:8080"
-      - "8082:8081"
-    depends_on:
-      - mongo
+#  api:
+#    image: qubic-stats-api
+#    container_name: "stats-api"
+#    environment:
+#      QUBIC_STATS_API_MONGO_HOSTNAME: "mongo"
+#    networks:
+#      - qubic-stats
+#    ports:
+#      - "8081:8080"
+#      - "8082:8081"
+#    depends_on:
+#      - mongo
 
 networks:
   qubic-stats:

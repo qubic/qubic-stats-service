@@ -17,3 +17,10 @@ type SpectrumData struct {
 	ActiveAddresses   int   `json:"activeAddresses"`
 	Timestamp         int64 `json:"timestamp"`
 }
+
+type RichListEntity struct {
+	Identity string `bson:"identity" json:"identity"`
+	Balance  int64  `bson:"balance" json:"balance"`
+}
+
+type RichList []RichListEntity
