@@ -25,18 +25,11 @@ func main() {
 func run() error {
 	var config struct {
 		Service struct {
-			HttpAddress string `conf:"default:0.0.0.0:8080"`
-			GrpcAddress string `conf:"default:0.0.0.0:8081"`
-
-			/* Possible options:
-			recurrent: update information recurrently based on an interval
-			on_request: update information during a request, if the cache validity expired
-			none: update information on every request
-			*/
-			// To be implemented in the future
-			//CachingStrategy            string        `conf:"default:recurrent"`
+			HttpAddress                string        `conf:"default:0.0.0.0:8080"`
+			GrpcAddress                string        `conf:"default:0.0.0.0:8081"`
 			CacheValidityDuration      time.Duration `conf:"default:10s"`
 			SpectrumDataUpdateInterval time.Duration `conf:"default:24h"`
+			RichListPageSize           int32         `conf:"default:100"`
 		}
 		Mongo struct {
 			Username string `conf:"default:user"`
@@ -103,9 +96,12 @@ func run() error {
 		MongoDatabase:            config.Mongo.Database,
 		MongoSpectrumCollection:  config.Mongo.SpectrumCollection,
 		MongoQubicDataCollection: config.Mongo.DataCollection,
+		MongoRichListCollection:  config.Mongo.RichListCollection,
 
 		CacheValidityDuration:    config.Service.CacheValidityDuration,
 		SpectrumValidityDuration: config.Service.SpectrumDataUpdateInterval,
+
+		RichListPageSize: config.Service.RichListPageSize,
 	}
 
 	cacheService := cache.NewCacheService(&serviceConfiguration, dbClient)
@@ -119,6 +115,7 @@ func run() error {
 		dbClient,
 		config.Mongo.Database,
 		config.Mongo.RichListCollection,
+		config.Service.RichListPageSize,
 	)
 	err = server.Start()
 	if err != nil {

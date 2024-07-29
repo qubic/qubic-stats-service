@@ -20,9 +20,8 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	StatsService_GetLatestData_FullMethodName     = "/qubic.stats.api.pb.StatsService/GetLatestData"
-	StatsService_GetRichListLength_FullMethodName = "/qubic.stats.api.pb.StatsService/GetRichListLength"
-	StatsService_GetRichListSlice_FullMethodName  = "/qubic.stats.api.pb.StatsService/GetRichListSlice"
+	StatsService_GetLatestData_FullMethodName    = "/qubic.stats.api.pb.StatsService/GetLatestData"
+	StatsService_GetRichListSlice_FullMethodName = "/qubic.stats.api.pb.StatsService/GetRichListSlice"
 )
 
 // StatsServiceClient is the client API for StatsService service.
@@ -30,7 +29,6 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StatsServiceClient interface {
 	GetLatestData(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetLatestDataResponse, error)
-	GetRichListLength(ctx context.Context, in *GetRichListLengthRequest, opts ...grpc.CallOption) (*GetRichListLengthResponse, error)
 	GetRichListSlice(ctx context.Context, in *GetRichListSliceRequest, opts ...grpc.CallOption) (*GetRichListSliceResponse, error)
 }
 
@@ -51,15 +49,6 @@ func (c *statsServiceClient) GetLatestData(ctx context.Context, in *emptypb.Empt
 	return out, nil
 }
 
-func (c *statsServiceClient) GetRichListLength(ctx context.Context, in *GetRichListLengthRequest, opts ...grpc.CallOption) (*GetRichListLengthResponse, error) {
-	out := new(GetRichListLengthResponse)
-	err := c.cc.Invoke(ctx, StatsService_GetRichListLength_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *statsServiceClient) GetRichListSlice(ctx context.Context, in *GetRichListSliceRequest, opts ...grpc.CallOption) (*GetRichListSliceResponse, error) {
 	out := new(GetRichListSliceResponse)
 	err := c.cc.Invoke(ctx, StatsService_GetRichListSlice_FullMethodName, in, out, opts...)
@@ -74,7 +63,6 @@ func (c *statsServiceClient) GetRichListSlice(ctx context.Context, in *GetRichLi
 // for forward compatibility
 type StatsServiceServer interface {
 	GetLatestData(context.Context, *emptypb.Empty) (*GetLatestDataResponse, error)
-	GetRichListLength(context.Context, *GetRichListLengthRequest) (*GetRichListLengthResponse, error)
 	GetRichListSlice(context.Context, *GetRichListSliceRequest) (*GetRichListSliceResponse, error)
 	mustEmbedUnimplementedStatsServiceServer()
 }
@@ -85,9 +73,6 @@ type UnimplementedStatsServiceServer struct {
 
 func (UnimplementedStatsServiceServer) GetLatestData(context.Context, *emptypb.Empty) (*GetLatestDataResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetLatestData not implemented")
-}
-func (UnimplementedStatsServiceServer) GetRichListLength(context.Context, *GetRichListLengthRequest) (*GetRichListLengthResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetRichListLength not implemented")
 }
 func (UnimplementedStatsServiceServer) GetRichListSlice(context.Context, *GetRichListSliceRequest) (*GetRichListSliceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRichListSlice not implemented")
@@ -123,24 +108,6 @@ func _StatsService_GetLatestData_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
-func _StatsService_GetRichListLength_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetRichListLengthRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(StatsServiceServer).GetRichListLength(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: StatsService_GetRichListLength_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StatsServiceServer).GetRichListLength(ctx, req.(*GetRichListLengthRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _StatsService_GetRichListSlice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRichListSliceRequest)
 	if err := dec(in); err != nil {
@@ -169,10 +136,6 @@ var StatsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetLatestData",
 			Handler:    _StatsService_GetLatestData_Handler,
-		},
-		{
-			MethodName: "GetRichListLength",
-			Handler:    _StatsService_GetRichListLength_Handler,
 		},
 		{
 			MethodName: "GetRichListSlice",

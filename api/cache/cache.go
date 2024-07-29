@@ -13,6 +13,9 @@ type Cache struct {
 
 	spectrumData           SpectrumData
 	lastSpectrumDataUpdate time.Time
+
+	richListLength    int32
+	richListPageCount int32
 }
 
 func (c *Cache) UpdateDataCache(spectrumData SpectrumData, qubicData QubicData) {
@@ -52,4 +55,32 @@ func (c *Cache) GetLastSpectrumDataUpdate() time.Time {
 	defer c.mutexLock.RUnlock()
 
 	return c.lastSpectrumDataUpdate
+}
+
+func (c *Cache) SetRichListLength(richListLength int32) {
+	c.mutexLock.Lock()
+	defer c.mutexLock.Unlock()
+
+	c.richListLength = richListLength
+}
+
+func (c *Cache) GetRichListLength() int32 {
+	c.mutexLock.RLock()
+	defer c.mutexLock.RUnlock()
+
+	return c.richListLength
+}
+
+func (c *Cache) SetRichListPageCount(richListPageCount int32) {
+	c.mutexLock.Lock()
+	defer c.mutexLock.Unlock()
+
+	c.richListPageCount = richListPageCount
+}
+
+func (c *Cache) GetRichListPageCount() int32 {
+	c.mutexLock.RLock()
+	defer c.mutexLock.RUnlock()
+
+	return c.richListPageCount
 }

@@ -30,6 +30,8 @@ type Server struct {
 	dbClient                *mongo.Client
 	mongoDatabase           string
 	mongoRichListCollection string
+
+	richListPageSize int32
 }
 
 func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
@@ -55,28 +57,18 @@ func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.
 
 }
 
-func (s *Server) GetRichListLength(ctx context.Context, request *protobuff.GetRichListLengthRequest) (*protobuff.GetRichListLengthResponse, error) {
-	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + request.Epoch)
-
-	count, err := collection.CountDocuments(ctx, bson.D{}, options.Count().SetHint("_id_"))
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to obtain length of rich list")
-	}
-
-	return &protobuff.GetRichListLengthResponse{
-		Length: uint32(count),
-	}, err
-
-}
-
 func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRichListSliceRequest) (*protobuff.GetRichListSliceResponse, error) {
 
+	lastPage := s.cache.GetRichListPageCount()
+	totalRecords := s.cache.GetRichListLength()
+
+	if request.Page < 0 || request.Page > lastPage {
+		return nil, status.Errorf(codes.Internal, "cannot find specified page. last page: %d", lastPage)
+	}
+	start := request.Page * s.richListPageSize
+
 	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + request.Epoch)
-
-	skip := int64(request.Start)
-	limit := int64(request.End - request.Start)
-
-	findOptions := options.Find().SetSkip(skip).SetLimit(limit).SetSort(bson.D{{"balance", -1}})
+	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(s.richListPageSize)).SetSort(bson.D{{"balance", -1}})
 
 	cursor, err := collection.Find(ctx, bson.D{{}}, findOptions)
 	if err != nil {
@@ -99,6 +91,11 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 	}
 
 	return &protobuff.GetRichListSliceResponse{
+		Pagination: &protobuff.Pagination{
+			CurrentPage:  request.Page,
+			TotalPages:   lastPage,
+			TotalRecords: totalRecords,
+		},
 		RichList: &protobuff.RichList{
 			Entities: list,
 		},
@@ -159,7 +156,7 @@ func (s *Server) Start() error {
 
 }
 
-func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, richListCollection string) *Server {
+func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, richListCollection string, richListPageSize int32) *Server {
 	return &Server{
 		httpAddress:             httpAddress,
 		grpcAddress:             grpcAddress,
@@ -167,5 +164,6 @@ func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbCli
 		dbClient:                dbClient,
 		mongoDatabase:           database,
 		mongoRichListCollection: richListCollection,
+		richListPageSize:        richListPageSize,
 	}
 }
