@@ -48,6 +48,7 @@ func run() error {
 			Database           string `conf:"default:qubic_frontend"`
 			SpectrumCollection string `conf:"default:spectrum_data"`
 			DataCollection     string `conf:"default:general_data"`
+			RichListCollection string `conf:"default:rich_list"`
 		}
 	}
 
@@ -114,7 +115,11 @@ func run() error {
 	server := rpc.NewServer(
 		config.Service.HttpAddress,
 		config.Service.GrpcAddress,
-		cacheService.Cache)
+		cacheService.Cache,
+		dbClient,
+		config.Mongo.Database,
+		config.Mongo.RichListCollection,
+	)
 	err = server.Start()
 	if err != nil {
 		return errors.Wrap(err, "starting the web server")

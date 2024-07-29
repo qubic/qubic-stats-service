@@ -21,15 +21,58 @@ message QubicData {
   uint64 burned_qus = 11;
 }
 
+// Rich list types
+
+message RichListEntity {
+  string identity = 1;
+  int64 balance = 2;
+}
+
+message RichList {
+  repeated RichListEntity entities = 1;
+}
+
+message GetRichListLengthRequest {
+  string epoch = 1;
+}
+
+message GetRichListLengthResponse {
+  uint32 length = 1;
+}
+
+message GetRichListSliceRequest {
+  string epoch = 1;
+  uint32 start = 2;
+  uint32 end = 3;
+}
+message GetRichListSliceResponse {
+  RichList rich_list = 1;
+}
+
+
+//Latest data
+
 message GetLatestDataResponse {
   QubicData data = 1;
 }
 
 service StatsService {
 
-  rpc GetLatestData(google.protobuf.Empty) returns (GetLatestDataResponse){
+  rpc GetLatestData(google.protobuf.Empty) returns (GetLatestDataResponse) {
     option (google.api.http) = {
       get: "/v1/latest-stats"
+    };
+  };
+
+  rpc GetRichListLength(GetRichListLengthRequest) returns (GetRichListLengthResponse) {
+    option (google.api.http) = {
+      get: "/v1/epochs/{epoch}/rich-list/length"
+    };
+  };
+
+  rpc GetRichListSlice(GetRichListSliceRequest) returns (GetRichListSliceResponse) {
+    option (google.api.http) = {
+      get: "/v1/epochs/{epoch}/rich-list"
     };
   };
 

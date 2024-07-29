@@ -71,3 +71,10 @@ func (e *Entity) UnmarshallFromBinary(r io.Reader) error {
 
 	return nil
 }
+
+type RichListEntity struct {
+	Identity string `bson:"identity"`
+	Balance  int64  `bson:"balance"`
+}
+
+type RichList []RichListEntity

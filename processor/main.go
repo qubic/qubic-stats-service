@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -23,7 +24,7 @@ type Configuration struct {
 	}
 	SpectrumParser struct {
 		SpectrumSize string `conf:"default:16777216"`
-		SpectrumFile string `conf:"default:./latest.qs"`
+		SpectrumFile string `conf:"default:./latest.118"`
 		OutputMode   string `conf:"default:db"`
 		OutputFile   string `conf:"default:spectrumData.json"`
 	}
@@ -44,6 +45,7 @@ type Configuration struct {
 		Database           string `conf:"default:qubic_frontend"`
 		SpectrumCollection string `conf:"default:spectrum_data"`
 		DataCollection     string `conf:"default:general_data"`
+		RichListCollection string `conf:"default:rich_list"`
 	}
 }
 
@@ -169,18 +171,26 @@ func run() error {
 			return errors.Wrap(err, "loading spectrum from file")
 		}
 
-		spectrumData, err := spectrum.CalculateSpectrumData(s)
+		results, err := spectrum.CalculateSpectrumData(s)
 		if err != nil {
 			return errors.Wrap(err, "calculating spectrum data")
 		}
 
 		if config.SpectrumParser.OutputMode == "file" {
-			err = spectrumData.SaveSpectrumDataToFile(config.SpectrumParser.OutputFile)
+			err = results.Data.SaveSpectrumDataToFile(config.SpectrumParser.OutputFile)
 			if err != nil {
 				return errors.Wrap(err, "saving spectrum data")
 			}
 			break
 		}
+
+		epoch := ""
+
+		split := strings.Split(config.SpectrumParser.SpectrumFile, ".")
+		if len(split) < 2 {
+			return errors.New("cannot parse file extension into epoch")
+		}
+		epoch = split[len(split)-1]
 
 		mongoConnection := MongoConfiguration{
 			Username:          config.Mongo.Username,
@@ -202,10 +212,12 @@ func run() error {
 			}
 		}()
 
-		err = spectrumData.SaveSpectrumDataToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
+		err = results.Data.SaveSpectrumDataToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
 		if err != nil {
 			return errors.Wrap(err, "saving spectrum data")
 		}
+
+		err = spectrum.SaveRichListToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.RichListCollection+"_"+epoch, results.List)
 
 		latestData, err := spectrum.LoadSpectrumDataFromDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
 

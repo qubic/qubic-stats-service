@@ -5,12 +5,14 @@ go 1.22.4
 require (
 	github.com/ardanlabs/conf v1.5.0
 	github.com/pkg/errors v0.9.1
-	github.com/qubic/go-archiver v0.5.0
+	github.com/qubic/go-archiver v0.5.2
+	github.com/qubic/go-node-connector v0.7.1
 	go.mongodb.org/mongo-driver v1.16.0
 	google.golang.org/grpc v1.64.0
 )
 
 require (
+	github.com/cloudflare/circl v1.3.7 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.1 // indirect
 	github.com/klauspost/compress v1.15.15 // indirect
