@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+var EmptyPaginationData = RichListPaginationData{}
+
+type RichListPaginationData struct {
+	RichListLength    int32
+	RichListPageCount int32
+}
+
 type Cache struct {
 	mutexLock sync.RWMutex
 
@@ -14,8 +21,7 @@ type Cache struct {
 	spectrumData           SpectrumData
 	lastSpectrumDataUpdate time.Time
 
-	richListLength    int32
-	richListPageCount int32
+	richListPaginationDataPerEpoch map[string]RichListPaginationData
 }
 
 func (c *Cache) UpdateDataCache(spectrumData SpectrumData, qubicData QubicData) {
@@ -57,30 +63,16 @@ func (c *Cache) GetLastSpectrumDataUpdate() time.Time {
 	return c.lastSpectrumDataUpdate
 }
 
-func (c *Cache) SetRichListLength(richListLength int32) {
+func (c *Cache) SetEpochPaginationData(epoch string, data RichListPaginationData) {
 	c.mutexLock.Lock()
 	defer c.mutexLock.Unlock()
 
-	c.richListLength = richListLength
+	c.richListPaginationDataPerEpoch[epoch] = data
 }
 
-func (c *Cache) GetRichListLength() int32 {
+func (c *Cache) GetEpochPaginationData(epoch string) RichListPaginationData {
 	c.mutexLock.RLock()
 	defer c.mutexLock.RUnlock()
 
-	return c.richListLength
-}
-
-func (c *Cache) SetRichListPageCount(richListPageCount int32) {
-	c.mutexLock.Lock()
-	defer c.mutexLock.Unlock()
-
-	c.richListPageCount = richListPageCount
-}
-
-func (c *Cache) GetRichListPageCount() int32 {
-	c.mutexLock.RLock()
-	defer c.mutexLock.RUnlock()
-
-	return c.richListPageCount
+	return c.richListPaginationDataPerEpoch[epoch]
 }

@@ -59,13 +59,25 @@ func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.
 
 func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRichListSliceRequest) (*protobuff.GetRichListSliceResponse, error) {
 
-	lastPage := s.cache.GetRichListPageCount()
-	totalRecords := s.cache.GetRichListLength()
+	page := request.Page
 
-	if request.Page < 0 || request.Page > lastPage {
+	if page == 0 {
+		page = 1
+	}
+
+	data := s.cache.GetEpochPaginationData(request.Epoch)
+
+	if data == cache.EmptyPaginationData {
+		return nil, status.Errorf(codes.NotFound, "could not find the rich list for the specified epoch")
+	}
+
+	lastPage := data.RichListPageCount
+	totalRecords := data.RichListLength
+
+	if page <= 0 || page > lastPage {
 		return nil, status.Errorf(codes.Internal, "cannot find specified page. last page: %d", lastPage)
 	}
-	start := request.Page * s.richListPageSize
+	start := (page - 1) * s.richListPageSize
 
 	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + request.Epoch)
 	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(s.richListPageSize)).SetSort(bson.D{{"balance", -1}})
@@ -92,7 +104,7 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 
 	return &protobuff.GetRichListSliceResponse{
 		Pagination: &protobuff.Pagination{
-			CurrentPage:  request.Page,
+			CurrentPage:  page,
 			TotalPages:   lastPage,
 			TotalRecords: totalRecords,
 		},

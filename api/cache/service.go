@@ -7,7 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"strconv"
+	"strings"
 	"time"
 )
 
@@ -40,7 +40,9 @@ type Service struct {
 
 func NewCacheService(configuration *ServiceConfiguration, mongoClient *mongo.Client) *Service {
 	return &Service{
-		Cache: &Cache{},
+		Cache: &Cache{
+			richListPaginationDataPerEpoch: make(map[string]RichListPaginationData),
+		},
 
 		mongoClient:              mongoClient,
 		mongoDatabase:            configuration.MongoDatabase,
@@ -138,24 +140,37 @@ func (s *Service) fetchSpectrumData(ctx context.Context) (SpectrumData, error) {
 
 func (s *Service) calculateRichListCache(ctx context.Context) error {
 
-	if s.Cache.GetRichListLength() == 0 || s.Cache.GetRichListPageCount() == 0 {
+	database := s.mongoClient.Database(s.mongoDatabase)
+	collections, err := database.ListCollectionNames(ctx, bson.D{})
+	if err != nil {
+		return errors.Wrap(err, "getting database collections")
+	}
 
-		epoch := strconv.Itoa(int(s.Cache.GetQubicData().Epoch))
+	for _, c := range collections {
+		if strings.Contains(c, "rich_list_") {
 
-		collection := s.mongoClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + epoch)
+			epoch := strings.Split(c, "_")[2]
 
-		count, err := collection.CountDocuments(ctx, bson.D{}, options.Count().SetHint("_id_"))
-		if err != nil {
-			return errors.Wrap(err, "getting rich list length")
+			collection := s.mongoClient.Database(s.mongoDatabase).Collection(c)
+
+			count, err := collection.CountDocuments(ctx, bson.D{}, options.Count().SetHint("_id_"))
+			if err != nil {
+				return errors.Wrap(err, "getting rich list length")
+			}
+
+			pageCount := int32(count) / s.richListPageSize
+			remainder := int32(count) % s.richListPageSize
+			if remainder != 0 {
+				pageCount += 1
+			}
+
+			data := RichListPaginationData{
+				RichListLength:    int32(count),
+				RichListPageCount: pageCount,
+			}
+			s.Cache.SetEpochPaginationData(epoch, data)
+
 		}
-		s.Cache.SetRichListLength(int32(count))
-
-		pageCount := int32(count) / s.richListPageSize
-		remainder := int32(count) % s.richListPageSize
-		if remainder != 0 {
-			pageCount += 1
-		}
-		s.Cache.SetRichListPageCount(pageCount)
 	}
 
 	return nil
