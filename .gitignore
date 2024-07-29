@@ -2,3 +2,5 @@
 
 *.qs
 *.json
+
+!*.swagger.json

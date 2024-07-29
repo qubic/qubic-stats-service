@@ -30,9 +30,9 @@ all: $(GO)
     --grpc-gateway_opt generate_unbound_methods=true $(OPT_ARGS) \
 	--go_out=paths=source_relative:. *.proto
 
-openapi: archive.proto
+openapi: stats-api.proto
 		protoc --openapiv2_out=logtostderr=true:. $(OPT_ARGS) \
-			   archive.proto
+			   stats-api.proto
 
 clean:
 		rm -f *.pb.go
