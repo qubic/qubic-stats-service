@@ -18,6 +18,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 )
 
 type Server struct {
@@ -65,7 +66,10 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 		page = 1
 	}
 
-	data := s.cache.GetEpochPaginationData(request.Epoch)
+	epoch := s.cache.GetQubicData().Epoch
+	epochString := strconv.Itoa(int(epoch))
+
+	data := s.cache.GetEpochPaginationData(epochString)
 
 	if data == cache.EmptyPaginationData {
 		return nil, status.Errorf(codes.NotFound, "could not find the rich list for the specified epoch")
@@ -79,7 +83,7 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 	}
 	start := (page - 1) * s.richListPageSize
 
-	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + request.Epoch)
+	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + epochString)
 	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(s.richListPageSize)).SetSort(bson.D{{"balance", -1}})
 
 	cursor, err := collection.Find(ctx, bson.D{{}}, findOptions)
@@ -108,6 +112,7 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 			TotalPages:   lastPage,
 			TotalRecords: totalRecords,
 		},
+		Epoch: epoch,
 		RichList: &protobuff.RichList{
 			Entities: list,
 		},
