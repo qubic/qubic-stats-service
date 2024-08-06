@@ -41,13 +41,14 @@ message RichList {
 }
 
 message GetRichListSliceRequest {
-  string epoch = 1;
-  int32 page = 2;
+  int32 page = 1;
+  int32 page_size = 2;
 
 }
 message GetRichListSliceResponse {
   Pagination pagination = 1;
-  RichList rich_list = 2;
+  uint32 epoch = 2;
+  RichList rich_list = 3;
 }
 
 
@@ -67,7 +68,7 @@ service StatsService {
 
   rpc GetRichListSlice(GetRichListSliceRequest) returns (GetRichListSliceResponse) {
     option (google.api.http) = {
-      get: "/v1/epochs/{epoch}/rich-list"
+      get: "/v1/rich-list"
     };
   };
 
