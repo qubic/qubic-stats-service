@@ -20,7 +20,7 @@ GO = $(PB:.proto=.pb.go)
 PWD = $(pwd)
 
 
-all: $(GO)
+all: $(GO) openapi
 
 %.pb.go: %.proto
 		protoc -I=. --go-grpc_out=paths=source_relative:. \

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/ardanlabs/conf"
 	"github.com/pkg/errors"
+	qubic "github.com/qubic/go-node-connector"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/rpc"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -42,6 +43,15 @@ func run() error {
 			SpectrumCollection string `conf:"default:spectrum_data"`
 			DataCollection     string `conf:"default:general_data"`
 			RichListCollection string `conf:"default:rich_list"`
+		}
+		Pool struct {
+			NodeFetcherUrl     string        `conf:"default:http://127.0.0.1:8070/status"`
+			NodeFetcherTimeout time.Duration `conf:"default:2s"`
+			NodePort           string        `conf:"default:21841"`
+			InitialCap         int           `conf:"default:5"`
+			MaxIdle            int           `conf:"default:20"`
+			MaxCap             int           `conf:"default:30"`
+			IdleTimeout        time.Duration `conf:"default:15s"`
 		}
 	}
 
@@ -108,12 +118,26 @@ func run() error {
 
 	exit := cacheService.Start()
 
+	pool, err := qubic.NewPoolConnection(qubic.PoolConfig{
+		InitialCap:         config.Pool.InitialCap,
+		MaxCap:             config.Pool.MaxCap,
+		MaxIdle:            config.Pool.MaxIdle,
+		IdleTimeout:        config.Pool.IdleTimeout,
+		NodeFetcherUrl:     config.Pool.NodeFetcherUrl,
+		NodeFetcherTimeout: config.Pool.NodeFetcherTimeout,
+		NodePort:           config.Pool.NodePort,
+	})
+	if err != nil {
+		return errors.Wrap(err, "creating qubic pool")
+	}
+
 	server := rpc.NewServer(
 		config.Service.HttpAddress,
 		config.Service.GrpcAddress,
 		cacheService.Cache,
 		dbClient,
 		config.Mongo.Database,
+		pool,
 		config.Mongo.RichListCollection,
 		config.Service.RichListPageSize,
 	)

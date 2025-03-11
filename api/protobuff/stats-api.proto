@@ -27,6 +27,7 @@ message Pagination {
   int32 total_records = 1;
   int32 current_page = 2;
   int32 total_pages = 3;
+  int32 page_size = 4;
 }
 
 // Rich list types
@@ -51,6 +52,27 @@ message GetRichListSliceResponse {
   RichList rich_list = 3;
 }
 
+// asset owners
+
+message AssetOwnership {
+  string identity = 1;
+  uint32 number_of_shares = 2;
+  uint32 managingContractIndex = 3;
+  uint32 issuanceIndex = 4;
+}
+
+message GetAssetOwnershipResponse {
+  Pagination pagination = 1;
+  uint32 tick = 2;
+  repeated AssetOwnership owners = 3;
+}
+
+message GetAssetOwnershipRequest {
+  string issuer_identity = 1;
+  string asset_name = 2;
+  uint32 page = 3;
+  uint32 page_size = 4;
+}
 
 //Latest data
 
@@ -69,6 +91,12 @@ service StatsService {
   rpc GetRichListSlice(GetRichListSliceRequest) returns (GetRichListSliceResponse) {
     option (google.api.http) = {
       get: "/v1/rich-list"
+    };
+  };
+
+  rpc GetAssetOwners(GetAssetOwnershipRequest) returns (GetAssetOwnershipResponse) {
+    option (google.api.http) = {
+      get: "/v1/issuers/{issuer_identity}/assets/{asset_name}/owners"
     };
   };
 
