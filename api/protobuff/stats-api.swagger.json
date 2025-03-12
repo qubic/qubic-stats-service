@@ -137,14 +137,6 @@
         "numberOfShares": {
           "type": "integer",
           "format": "int64"
-        },
-        "managingContractIndex": {
-          "type": "integer",
-          "format": "int64"
-        },
-        "issuanceIndex": {
-          "type": "integer",
-          "format": "int64"
         }
       }
     },

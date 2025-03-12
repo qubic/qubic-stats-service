@@ -6,7 +6,6 @@ option go_package = "github.com/qubic/qubic-stats-api/protobuff/";
 import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 
-
 message QubicData {
   int64 timestamp = 1;
   int64 circulating_supply = 2;
@@ -54,11 +53,11 @@ message GetRichListSliceResponse {
 
 // asset owners
 
-message AssetOwnership {
-  string identity = 1;
-  uint32 number_of_shares = 2;
-  uint32 managingContractIndex = 3;
-  uint32 issuanceIndex = 4;
+message GetAssetOwnershipRequest {
+  string issuer_identity = 1;
+  string asset_name = 2;
+  uint32 page = 3;
+  uint32 page_size = 4;
 }
 
 message GetAssetOwnershipResponse {
@@ -67,11 +66,9 @@ message GetAssetOwnershipResponse {
   repeated AssetOwnership owners = 3;
 }
 
-message GetAssetOwnershipRequest {
-  string issuer_identity = 1;
-  string asset_name = 2;
-  uint32 page = 3;
-  uint32 page_size = 4;
+message AssetOwnership {
+  string identity = 1;
+  uint32 number_of_shares = 2;
 }
 
 //Latest data

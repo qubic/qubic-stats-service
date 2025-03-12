@@ -49,10 +49,8 @@ func (s *Server) GetOwnedAssets(ctx context.Context, issuerIdentity, assetName s
 		}
 
 		assetOwnership := protobuff.AssetOwnership{
-			Identity:              owner.String(),
-			NumberOfShares:        uint32(asset.Asset.NumberOfUnits),
-			ManagingContractIndex: uint32(asset.Asset.ManagingContractIndex),
-			IssuanceIndex:         asset.Asset.IssuanceIndex,
+			Identity:       owner.String(),
+			NumberOfShares: uint32(asset.Asset.NumberOfUnits),
 		}
 
 		tick = max(asset.Tick, tick)
