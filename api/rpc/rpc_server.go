@@ -4,7 +4,7 @@ import (
 	"context"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/pkg/errors"
-	qubic "github.com/qubic/go-node-connector"
+	"github.com/qubic/go-node-connector/types"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
 	"go.mongodb.org/mongo-driver/bson"
@@ -20,6 +20,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 )
 
@@ -36,7 +37,7 @@ type Server struct {
 
 	richListPageSize int32
 
-	qPool *qubic.Pool
+	assetService *AssetService
 }
 
 func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
@@ -139,6 +140,8 @@ type Pageable struct {
 const maxPageSize uint32 = 1000
 const defaultPageSize uint32 = 100
 
+var assetNameRegexp, _ = regexp.Compile("^[A-Z0-9]{1,7}$")
+
 func (s *Server) GetAssetOwners(ctx context.Context, req *protobuff.GetAssetOwnershipRequest) (*protobuff.GetAssetOwnershipResponse, error) {
 
 	var pageSize uint32
@@ -150,9 +153,22 @@ func (s *Server) GetAssetOwners(ctx context.Context, req *protobuff.GetAssetOwne
 		pageSize = req.GetPageSize()
 	}
 
+	// validate issuer identity
+	identity := types.Identity(req.IssuerIdentity)
+	_, err := identity.ToPubKey(false)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid issuer: %s", err.Error())
+	}
+
+	// validate asset name
+	if len(req.AssetName) == 0 && !assetNameRegexp.MatchString(req.AssetName) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid asset name: %s", req.AssetName)
+	}
+
 	pageNumber := max(0, int(req.Page)-1) // API index starts with '1', implementation index starts with '0'.
 
-	ownerships, tick, totalCount, err := s.GetOwnedAssets(ctx, req.GetIssuerIdentity(), req.GetAssetName(), Pageable{uint32(pageNumber), pageSize})
+	ownerships, tick, totalCount, err := s.assetService.GetOwnedAssets(ctx, req.GetIssuerIdentity(), req.GetAssetName(),
+		Pageable{uint32(pageNumber), pageSize})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "getting asset ownerships: %s", err.Error())
 	}
@@ -270,7 +286,7 @@ func (s *Server) Start() error {
 
 }
 
-func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, qPool *qubic.Pool, richListCollection string, richListPageSize int32) *Server {
+func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, assetService *AssetService, richListCollection string, richListPageSize int32) *Server {
 	return &Server{
 		httpAddress:             httpAddress,
 		grpcAddress:             grpcAddress,
@@ -279,6 +295,6 @@ func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbCli
 		mongoDatabase:           database,
 		mongoRichListCollection: richListCollection,
 		richListPageSize:        richListPageSize,
-		qPool:                   qPool,
+		assetService:            assetService,
 	}
 }
