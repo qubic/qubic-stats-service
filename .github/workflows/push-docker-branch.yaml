@@ -1,0 +1,27 @@
+name: Deploy dev images to GHCR
+
+on:
+  push:
+    branches:
+      - 'feature/assets'
+
+jobs:
+  push-store-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout GitHub Action'
+        uses: actions/checkout@main
+
+      - name: 'Login to GitHub Container Registry'
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{github.actor}}
+          password: ${{secrets.GITHUB_TOKEN}}
+
+      - name: 'Build Inventory Image'
+        run: |
+          docker build processor --tag ghcr.io/qubic/qubic-stats-processor:assets
+          docker push ghcr.io/qubic/qubic-stats-processor:assets
+          docker build api --tag ghcr.io/qubic/qubic-stats-api:assets
+          docker push ghcr.io/qubic/qubic-stats-api:assets
