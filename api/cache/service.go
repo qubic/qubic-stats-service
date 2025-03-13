@@ -93,7 +93,7 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 	var spectrumData SpectrumData
 	var err error
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if updateQubicData {
