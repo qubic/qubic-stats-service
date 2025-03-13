@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"github.com/ardanlabs/conf"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
+	qubic "github.com/qubic/go-node-connector"
+	"github.com/qubic/go-node-connector/types"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/rpc"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -42,6 +45,18 @@ func run() error {
 			SpectrumCollection string `conf:"default:spectrum_data"`
 			DataCollection     string `conf:"default:general_data"`
 			RichListCollection string `conf:"default:rich_list"`
+		}
+		Pool struct {
+			NodeFetcherUrl     string        `conf:"default:http://127.0.0.1:8070/status"`
+			NodeFetcherTimeout time.Duration `conf:"default:2s"`
+			NodePort           string        `conf:"default:21841"`
+			InitialCap         int           `conf:"default:5"`
+			MaxIdle            int           `conf:"default:20"`
+			MaxCap             int           `conf:"default:30"`
+			IdleTimeout        time.Duration `conf:"default:15s"`
+		}
+		AssetService struct {
+			Ttl time.Duration `conf:"default:10m"`
 		}
 	}
 
@@ -105,8 +120,30 @@ func run() error {
 	}
 
 	cacheService := cache.NewCacheService(&serviceConfiguration, dbClient)
-
 	exit := cacheService.Start()
+
+	pool, err := qubic.NewPoolConnection(qubic.PoolConfig{
+		InitialCap:         config.Pool.InitialCap,
+		MaxCap:             config.Pool.MaxCap,
+		MaxIdle:            config.Pool.MaxIdle,
+		IdleTimeout:        config.Pool.IdleTimeout,
+		NodeFetcherUrl:     config.Pool.NodeFetcherUrl,
+		NodeFetcherTimeout: config.Pool.NodeFetcherTimeout,
+		NodePort:           config.Pool.NodePort,
+	})
+	if err != nil {
+		return errors.Wrap(err, "creating qubic pool")
+	}
+	log.Print("Created qubic node pool.")
+	assetOwnersCache := ttlcache.New[string, *types.AssetOwnerships](
+		ttlcache.WithTTL[string, *types.AssetOwnerships](config.AssetService.Ttl),
+		ttlcache.WithDisableTouchOnHit[string, *types.AssetOwnerships](),
+		ttlcache.WithCapacity[string, *types.AssetOwnerships](uint64(1024*1024*100)), // 100 MB
+	)
+	go assetOwnersCache.Start()
+	log.Printf("Created cache for asset owners with ttl [%s]", config.AssetService.Ttl)
+	assetsService := rpc.NewAssetService(pool, assetOwnersCache)
+	log.Print("Created assets service.")
 
 	server := rpc.NewServer(
 		config.Service.HttpAddress,
@@ -114,6 +151,7 @@ func run() error {
 		cacheService.Cache,
 		dbClient,
 		config.Mongo.Database,
+		assetsService,
 		config.Mongo.RichListCollection,
 		config.Service.RichListPageSize,
 	)
@@ -121,6 +159,7 @@ func run() error {
 	if err != nil {
 		return errors.Wrap(err, "starting the web server")
 	}
+	log.Print("Started web server.")
 
 	<-exit
 

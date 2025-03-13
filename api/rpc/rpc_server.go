@@ -3,6 +3,8 @@ package rpc
 import (
 	"context"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/pkg/errors"
+	"github.com/qubic/go-node-connector/types"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
 	"go.mongodb.org/mongo-driver/bson"
@@ -18,6 +20,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 )
 
@@ -33,6 +36,8 @@ type Server struct {
 	mongoRichListCollection string
 
 	richListPageSize int32
+
+	assetService AssetService
 }
 
 func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
@@ -118,6 +123,7 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 			CurrentPage:  page,
 			TotalPages:   pageCount,
 			TotalRecords: totalRecords,
+			PageSize:     request.PageSize,
 		},
 		Epoch: epoch,
 		RichList: &protobuff.RichList{
@@ -125,6 +131,121 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 		},
 	}, nil
 
+}
+
+type Pageable struct {
+	Page, Size uint32
+}
+
+const maxPageSize uint32 = 1000
+const defaultPageSize uint32 = 100
+
+var assetNameRegexp, _ = regexp.Compile("^[A-Z0-9]{1,7}$")
+
+func (s *Server) GetAssetOwners(ctx context.Context, req *protobuff.GetAssetOwnershipRequest) (*protobuff.GetAssetOwnershipResponse, error) {
+
+	var pageSize uint32
+	if req.GetPageSize() > maxPageSize {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid page size (maximum is %d).", maxPageSize)
+	} else if req.GetPageSize() == 0 {
+		pageSize = defaultPageSize
+	} else {
+		pageSize = req.GetPageSize()
+	}
+
+	// validate issuer identity
+	err := validateIdentity(req.IssuerIdentity)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid issuer: %s", err.Error())
+	}
+
+	// validate asset name
+	if len(req.AssetName) == 0 || !assetNameRegexp.MatchString(req.AssetName) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid asset name: %s", req.AssetName)
+	}
+
+	pageNumber := max(0, int(req.Page)-1) // API index starts with '1', implementation index starts with '0'.
+
+	ownerships, tick, totalCount, err := s.assetService.GetOwnedAssets(ctx, req.GetIssuerIdentity(), req.GetAssetName(),
+		Pageable{uint32(pageNumber), pageSize})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "getting asset ownerships: %s", err.Error())
+	}
+
+	pagination, err := getPaginationInformation(totalCount, pageNumber+1, int(pageSize))
+	if err != nil {
+		log.Printf("Error creating pagination info: %s", err.Error())
+		return nil, status.Error(codes.Internal, "creating pagination info")
+	}
+
+	return &protobuff.GetAssetOwnershipResponse{
+		Pagination: pagination,
+		Tick:       tick,
+		Owners:     ownerships,
+	}, nil
+
+}
+
+func validateIdentity(identityString string) error {
+	identity := types.Identity(identityString)
+	pubKey, err := identity.ToPubKey(false)
+	if err != nil {
+		return err
+	}
+	reverse, err := identity.FromPubKey(pubKey, false)
+	if err != nil {
+		return err
+	}
+	if reverse != identity { // checksum errors are not checked in conversion
+		return errors.Errorf("invalid identity [%s]", identityString)
+	}
+	return nil
+}
+
+// ATTENTION: first page has pageNumber == 1 as API starts with index 1
+func getPaginationInformation(totalRecords, pageNumber, pageSize int) (*protobuff.Pagination, error) {
+
+	if pageNumber < 1 {
+		return nil, errors.Errorf("invalid page number [%d]", pageNumber)
+	}
+
+	if pageSize < 1 {
+		return nil, errors.Errorf("invalid page size [%d]", pageSize)
+	}
+
+	if totalRecords < 0 {
+		return nil, errors.Errorf("invalid number of total records [%d]", totalRecords)
+	}
+
+	totalPages := totalRecords / pageSize // rounds down
+	if totalRecords%pageSize != 0 {
+		totalPages += 1
+	}
+
+	// next page starts at index 1. -1 if no next page.
+	nextPage := pageNumber + 1
+	if nextPage > totalPages {
+		nextPage = -1
+	}
+
+	// previous page starts at index 1. -1 if no previous page
+	previousPage := pageNumber - 1
+	if previousPage == 0 {
+		previousPage = -1
+	}
+
+	currentPage := pageNumber
+	if totalRecords == 0 {
+		currentPage = 0
+	}
+
+	pagination := protobuff.Pagination{
+		TotalRecords: int32(totalRecords),
+		CurrentPage:  int32(currentPage), // 0 if there are no records
+		TotalPages:   int32(totalPages),  // 0 if there are no records
+		PageSize:     int32(pageSize),
+	}
+	return &pagination, nil
 }
 
 func (s *Server) Start() error {
@@ -180,7 +301,7 @@ func (s *Server) Start() error {
 
 }
 
-func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, richListCollection string, richListPageSize int32) *Server {
+func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, assetService *AssetServiceImpl, richListCollection string, richListPageSize int32) *Server {
 	return &Server{
 		httpAddress:             httpAddress,
 		grpcAddress:             grpcAddress,
@@ -189,5 +310,6 @@ func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbCli
 		mongoDatabase:           database,
 		mongoRichListCollection: richListCollection,
 		richListPageSize:        richListPageSize,
+		assetService:            assetService,
 	}
 }
