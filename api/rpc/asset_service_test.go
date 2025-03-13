@@ -14,18 +14,27 @@ import (
 )
 
 var tcpServer net.Listener
-var assetService *AssetService
+var assetService *AssetServiceImpl
 var assetOwnersCache *ttlcache.Cache[string, *types.AssetOwnerships]
 
 var clientPoolCount = 0
 
 type FakePool struct {
-	client *qubic.Client
 }
 
 func (f FakePool) Get() (*qubic.Client, error) {
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", "12345"), time.Second)
+	if err != nil {
+		log.Fatal("creating connection")
+	}
+	client, err := qubic.NewClientWithConn(context.Background(), conn)
+	if err != nil {
+		log.Fatal("creating client")
+	}
+
 	clientPoolCount++
-	return f.client, nil
+	return client, nil
 }
 
 func (f FakePool) Put(*qubic.Client) error {
@@ -44,8 +53,8 @@ func Test_AssetService_GetOwnedAssets_ReturnAll(t *testing.T) {
 		Pageable{Page: 0, Size: 10})
 	assert.NoError(t, err)
 	assert.Len(t, assets, 7)
-	assert.Equal(t, int(tick), 20192347)
-	assert.Equal(t, total, 7)
+	assert.Equal(t, 20192347, int(tick))
+	assert.Equal(t, 7, total)
 
 	tearDown(t)
 
@@ -64,6 +73,10 @@ func Test_AssetService_GetOwnedAssets_CacheResponse(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, assets, 7)
 
+		// sorted descending
+		assert.Equal(t, 4, int(assets[0].NumberOfShares))
+		assert.Equal(t, 1, int(assets[1].NumberOfShares))
+
 		assert.Equal(t, 1, clientPoolCount) // client used only once
 		assert.True(t, assetOwnersCache.Has("owners:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB:TEST"))
 	}
@@ -81,21 +94,38 @@ func Test_AssetService_GetOwnedAssets_ReturnPaginated(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, assets, 5)
 	assert.Equal(t, int(tick), 20192347)
-	assert.Equal(t, total, 7)
+	assert.Equal(t, 7, total)
+
+	assert.Equal(t, 4, int(assets[0].NumberOfShares))
+	assert.Equal(t, 1, int(assets[1].NumberOfShares))
+	assert.Equal(t, 1, int(assets[2].NumberOfShares))
+	assert.Equal(t, 1, int(assets[3].NumberOfShares))
+	assert.Equal(t, 1, int(assets[4].NumberOfShares))
 
 	assets, tick, total, err = assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
 		Pageable{Page: 1, Size: 5})
 	assert.NoError(t, err)
 	assert.Len(t, assets, 2)
-	assert.Equal(t, int(tick), 20192347)
-	assert.Equal(t, total, 7)
+	assert.Equal(t, 20192347, int(tick))
+	assert.Equal(t, 7, total)
+
+	assert.Equal(t, 1, int(assets[0].NumberOfShares))
+	assert.Equal(t, 1, int(assets[1].NumberOfShares))
 
 	assets, tick, total, err = assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
 		Pageable{Page: 6, Size: 1})
 	assert.NoError(t, err)
 	assert.Len(t, assets, 1)
-	assert.Equal(t, int(tick), 20192347)
-	assert.Equal(t, total, 7)
+	assert.Equal(t, 20192347, int(tick))
+	assert.Equal(t, 7, total)
+	assert.Equal(t, 1, int(assets[0].NumberOfShares))
+
+	assets, tick, total, err = assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
+		Pageable{Page: 6, Size: 10})
+	assert.NoError(t, err)
+	assert.Len(t, assets, 0)
+	assert.Equal(t, 0, int(tick))
+	assert.Equal(t, 7, total)
 
 	tearDown(t)
 
@@ -108,21 +138,8 @@ func setup(t *testing.T) {
 		ttlcache.WithCapacity[string, *types.AssetOwnerships](uint64(1024*1024)),
 	)
 	go assetOwnersCache.Start()
-
-	startTcpServer(t)
-
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", "12345"), time.Second)
-	assert.NoError(t, err)
-
-	//client, err := qubic.NewClient(context.Background(), "localhost", "12345")
-	client, err := qubic.NewClientWithConn(context.Background(), conn)
-	assert.NoError(t, err)
-
-	pool := FakePool{
-		client: client,
-	}
-
-	assetService = NewAssetService(pool, assetOwnersCache)
+	startTcpServer(t) // this is a bit hacky. only serves one response.
+	assetService = NewAssetService(FakePool{}, assetOwnersCache)
 }
 
 func tearDown(t *testing.T) {
@@ -149,9 +166,9 @@ func tcpAccept(t *testing.T) {
 func handleRequest(conn net.Conn, t *testing.T) {
 	log.Print("Received request")
 	hexStr := "4000003511dcb7b9" + // RESPOND_ASSETS
-		"7b5efffa039860590ecc801ab2f9a95da0b97592398d3414db1d3e44cac79d9a020001000400000004000000000000005b1c34017b5eff00" +
+		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" + // 1 share
 		"4000003511dcb7b9" + // RESPOND_ASSETS
-		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" +
+		"7b5efffa039860590ecc801ab2f9a95da0b97592398d3414db1d3e44cac79d9a020001000400000004000000000000005b1c34017b5eff00" + // 4 shares
 		"4000003511dcb7b9" + // RESPOND_ASSETS
 		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" +
 		"4000003511dcb7b9" + // RESPOND_ASSETS

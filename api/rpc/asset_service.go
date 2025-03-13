@@ -15,14 +15,13 @@ import (
 	"slices"
 )
 
-type AssetService struct {
-	qPool           ClientPool
-	assetOwnerCache *ttlcache.Cache[string, *types.AssetOwnerships]
+type AssetService interface {
+	GetOwnedAssets(ctx context.Context, issuerIdentity, assetName string, page Pageable) ([]*protobuff.AssetOwnership, uint32, int, error)
 }
 
-type AssetClient interface {
-	GetAssetOwnershipsByFilter(ctx context.Context, issuerIdentity, assetName,
-		ownerIdentity string, ownerContract uint16) (types.AssetOwnerships, error)
+type AssetServiceImpl struct {
+	qPool           ClientPool
+	assetOwnerCache *ttlcache.Cache[string, *types.AssetOwnerships]
 }
 
 type ClientPool interface {
@@ -31,8 +30,8 @@ type ClientPool interface {
 	Put(*qubic.Client) error
 }
 
-func NewAssetService(qPool ClientPool, assetOwnersCache *ttlcache.Cache[string, *types.AssetOwnerships]) *AssetService {
-	service := AssetService{
+func NewAssetService(qPool ClientPool, assetOwnersCache *ttlcache.Cache[string, *types.AssetOwnerships]) *AssetServiceImpl {
+	service := AssetServiceImpl{
 		qPool:           qPool,
 		assetOwnerCache: assetOwnersCache,
 	}
@@ -41,7 +40,7 @@ func NewAssetService(qPool ClientPool, assetOwnersCache *ttlcache.Cache[string, 
 
 const ownersCacheKey string = "owners:%s:%s"
 
-func (s *AssetService) GetOwnedAssets(ctx context.Context, issuerIdentity, assetName string, page Pageable) ([]*protobuff.AssetOwnership, uint32, int, error) {
+func (s *AssetServiceImpl) GetOwnedAssets(ctx context.Context, issuerIdentity, assetName string, page Pageable) ([]*protobuff.AssetOwnership, uint32, int, error) {
 
 	retrievedAssets, err := s.getAssetOwners(ctx, issuerIdentity, assetName)
 	if err != nil {
@@ -82,7 +81,7 @@ func (s *AssetService) GetOwnedAssets(ctx context.Context, issuerIdentity, asset
 	return ownerships, tick, len(assets), nil
 }
 
-func (s *AssetService) getAssetOwners(ctx context.Context, issuerIdentity, assetName string) (*types.AssetOwnerships, error) {
+func (s *AssetServiceImpl) getAssetOwners(ctx context.Context, issuerIdentity, assetName string) (*types.AssetOwnerships, error) {
 	key := cacheKey(issuerIdentity, assetName)
 	var assets *types.AssetOwnerships
 	if s.assetOwnerCache.Has(key) {
@@ -102,7 +101,7 @@ func (s *AssetService) getAssetOwners(ctx context.Context, issuerIdentity, asset
 	return assets, nil
 }
 
-func (s *AssetService) getAssetOwnersFromNode(ctx context.Context, identity string, name string) (*types.AssetOwnerships, error) {
+func (s *AssetServiceImpl) getAssetOwnersFromNode(ctx context.Context, identity string, name string) (*types.AssetOwnerships, error) {
 	client, err := s.qPool.Get()
 	if err != nil {
 		return nil, errors.Wrap(err, "getting pool connection")

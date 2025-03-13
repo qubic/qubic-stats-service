@@ -37,7 +37,7 @@ type Server struct {
 
 	richListPageSize int32
 
-	assetService *AssetService
+	assetService AssetService
 }
 
 func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
@@ -154,14 +154,13 @@ func (s *Server) GetAssetOwners(ctx context.Context, req *protobuff.GetAssetOwne
 	}
 
 	// validate issuer identity
-	identity := types.Identity(req.IssuerIdentity)
-	_, err := identity.ToPubKey(false)
+	err := validateIdentity(req.IssuerIdentity)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid issuer: %s", err.Error())
 	}
 
 	// validate asset name
-	if len(req.AssetName) == 0 && !assetNameRegexp.MatchString(req.AssetName) {
+	if len(req.AssetName) == 0 || !assetNameRegexp.MatchString(req.AssetName) {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid asset name: %s", req.AssetName)
 	}
 
@@ -185,6 +184,22 @@ func (s *Server) GetAssetOwners(ctx context.Context, req *protobuff.GetAssetOwne
 		Owners:     ownerships,
 	}, nil
 
+}
+
+func validateIdentity(identityString string) error {
+	identity := types.Identity(identityString)
+	pubKey, err := identity.ToPubKey(false)
+	if err != nil {
+		return err
+	}
+	reverse, err := identity.FromPubKey(pubKey, false)
+	if err != nil {
+		return err
+	}
+	if reverse != identity { // checksum errors are not checked in conversion
+		return errors.Errorf("invalid identity [%s]", identityString)
+	}
+	return nil
 }
 
 // ATTENTION: first page has pageNumber == 1 as API starts with index 1
@@ -286,7 +301,7 @@ func (s *Server) Start() error {
 
 }
 
-func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, assetService *AssetService, richListCollection string, richListPageSize int32) *Server {
+func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, assetService *AssetServiceImpl, richListCollection string, richListPageSize int32) *Server {
 	return &Server{
 		httpAddress:             httpAddress,
 		grpcAddress:             grpcAddress,
