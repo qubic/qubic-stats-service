@@ -133,7 +133,8 @@ func (s *Service) scrapeData() (Data, error) {
 
 	ticksThisEpoch := latestTick - epochStartingTick
 
-	burnedQUs := (uint64(epoch) * uint64(1000000000000)) - uint64(spectrumData.CirculatingSupply)
+	//burnedQUs := (uint64(epoch) * uint64(1000000000000)) - uint64(spectrumData.CirculatingSupply)
+	burnedQUs := uint64(15825620460754)
 
 	emptyTickCount := archiverStatus.EmptyTicksPerEpoch[epoch]
 
