@@ -68,7 +68,7 @@ message GetAssetOwnershipResponse {
 
 message AssetOwnership {
   string identity = 1;
-  uint32 number_of_shares = 2;
+  int64 number_of_shares = 2;
 }
 
 //Latest data

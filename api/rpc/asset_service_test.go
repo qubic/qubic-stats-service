@@ -53,7 +53,7 @@ func Test_AssetService_GetOwnedAssets_ReturnAll(t *testing.T) {
 		Pageable{Page: 0, Size: 10})
 	assert.NoError(t, err)
 	assert.Len(t, assets, 7)
-	assert.Equal(t, 20192347, int(tick))
+	assert.Equal(t, 22014071, int(tick))
 	assert.Equal(t, 7, total)
 
 	tearDown(t)
@@ -74,8 +74,8 @@ func Test_AssetService_GetOwnedAssets_CacheResponse(t *testing.T) {
 		assert.Len(t, assets, 7)
 
 		// sorted descending
-		assert.Equal(t, 4, int(assets[0].NumberOfShares))
-		assert.Equal(t, 1, int(assets[1].NumberOfShares))
+		assert.Equal(t, int64(31780730794), assets[0].NumberOfShares)
+		assert.Equal(t, 4, int(assets[1].NumberOfShares))
 
 		assert.Equal(t, 1, clientPoolCount) // client used only once
 		assert.True(t, assetOwnersCache.Has("owners:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB:TEST"))
@@ -93,11 +93,11 @@ func Test_AssetService_GetOwnedAssets_ReturnPaginated(t *testing.T) {
 		Pageable{Page: 0, Size: 5})
 	assert.NoError(t, err)
 	assert.Len(t, assets, 5)
-	assert.Equal(t, int(tick), 20192347)
+	assert.Equal(t, int(tick), 22014071)
 	assert.Equal(t, 7, total)
 
-	assert.Equal(t, 4, int(assets[0].NumberOfShares))
-	assert.Equal(t, 1, int(assets[1].NumberOfShares))
+	assert.Equal(t, int64(31780730794), assets[0].NumberOfShares)
+	assert.Equal(t, 4, int(assets[1].NumberOfShares))
 	assert.Equal(t, 1, int(assets[2].NumberOfShares))
 	assert.Equal(t, 1, int(assets[3].NumberOfShares))
 	assert.Equal(t, 1, int(assets[4].NumberOfShares))
@@ -166,11 +166,11 @@ func tcpAccept(t *testing.T) {
 func handleRequest(conn net.Conn, t *testing.T) {
 	log.Print("Received request")
 	hexStr := "4000003511dcb7b9" + // RESPOND_ASSETS
-		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" + // 1 share
+		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" + // 1 share / tick number 20192347 (test data)
 		"4000003511dcb7b9" + // RESPOND_ASSETS
 		"7b5efffa039860590ecc801ab2f9a95da0b97592398d3414db1d3e44cac79d9a020001000400000004000000000000005b1c34017b5eff00" + // 4 shares
 		"4000003511dcb7b9" + // RESPOND_ASSETS
-		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" +
+		"2fc8a29a7a4a6969cd3a57244c48c5027b5b6940ed11f739d052b40e9dd357fa020001000830bb00aa7747660700000077e84f012fc8a200" + // 31780730794 shares / tick number 22014071
 		"4000003511dcb7b9" + // RESPOND_ASSETS
 		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" +
 		"4000003511dcb7b9" + // RESPOND_ASSETS
