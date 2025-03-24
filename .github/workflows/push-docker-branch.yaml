@@ -3,7 +3,7 @@ name: Deploy dev images to GHCR
 on:
   push:
     branches:
-      - 'feature/assets'
+      - 'bugfix/asset-shares-data-type'
 
 jobs:
   push-store-image:
