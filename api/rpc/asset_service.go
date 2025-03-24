@@ -70,7 +70,7 @@ func (s *AssetServiceImpl) GetOwnedAssets(ctx context.Context, issuerIdentity, a
 
 		assetOwnership := protobuff.AssetOwnership{
 			Identity:       owner.String(),
-			NumberOfShares: uint32(asset.Asset.NumberOfUnits),
+			NumberOfShares: asset.Asset.NumberOfUnits,
 		}
 
 		tick = max(asset.Tick, tick)
