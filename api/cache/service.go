@@ -3,12 +3,13 @@ package cache
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"strings"
-	"time"
 )
 
 type ServiceConfiguration struct {
@@ -34,6 +35,8 @@ type Service struct {
 
 	cacheValidityDuration    time.Duration
 	spectrumValidityDuration time.Duration
+
+	lastRichListCacheUpdate time.Time
 
 	richListPageSize int32
 }
@@ -114,9 +117,11 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 
 	s.Cache.UpdateDataCache(spectrumData, qubicData)
 
-	err = s.calculateRichListCache(ctx)
-	if err != nil {
-		return errors.Wrap(err, "calculating rich list length and page count")
+	if time.Since(s.lastRichListCacheUpdate) > 5*time.Minute {
+		err = s.calculateRichListCache(ctx)
+		if err != nil {
+			return errors.Wrap(err, "calculating rich list length and page count")
+		}
 	}
 
 	return nil
@@ -171,6 +176,7 @@ func (s *Service) calculateRichListCache(ctx context.Context) error {
 			s.Cache.SetEpochPaginationData(epoch, data)
 
 		}
+		time.Sleep(1 * time.Second)
 	}
 
 	return nil
