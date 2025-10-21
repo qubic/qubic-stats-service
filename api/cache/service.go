@@ -22,6 +22,8 @@ type ServiceConfiguration struct {
 	SpectrumValidityDuration time.Duration
 
 	RichListPageSize int32
+
+	CacheUpdateTimeout time.Duration
 }
 
 type Service struct {
@@ -37,6 +39,7 @@ type Service struct {
 	spectrumValidityDuration time.Duration
 
 	lastRichListCacheUpdate time.Time
+	cacheUpdateTimeout      time.Duration
 
 	richListPageSize int32
 }
@@ -57,6 +60,8 @@ func NewCacheService(configuration *ServiceConfiguration, mongoClient *mongo.Cli
 		spectrumValidityDuration: configuration.SpectrumValidityDuration,
 
 		richListPageSize: configuration.RichListPageSize,
+
+		cacheUpdateTimeout: configuration.CacheUpdateTimeout,
 	}
 
 }
@@ -96,7 +101,7 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 	var spectrumData SpectrumData
 	var err error
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), s.cacheUpdateTimeout)
 	defer cancel()
 
 	if updateQubicData {

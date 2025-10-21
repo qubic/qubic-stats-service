@@ -34,6 +34,7 @@ func run() error {
 			CacheValidityDuration      time.Duration `conf:"default:10s"`
 			SpectrumDataUpdateInterval time.Duration `conf:"default:24h"`
 			RichListPageSize           int32         `conf:"default:100"`
+			CacheUpdateTimeout         time.Duration `conf:"default:30s"`
 		}
 		Mongo struct {
 			Username string `conf:"default:user"`
@@ -120,6 +121,8 @@ func run() error {
 		SpectrumValidityDuration: config.Service.SpectrumDataUpdateInterval,
 
 		RichListPageSize: config.Service.RichListPageSize,
+
+		CacheUpdateTimeout: config.Service.CacheUpdateTimeout,
 	}
 
 	cacheService := cache.NewCacheService(&serviceConfiguration, dbClient)
