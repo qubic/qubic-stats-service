@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"time"
+
 	"github.com/ardanlabs/conf"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
@@ -12,9 +16,6 @@ import (
 	"github.com/qubic/qubic-stats-api/rpc"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"log"
-	"os"
-	"time"
 )
 
 const prefix = "QUBIC_STATS_API"

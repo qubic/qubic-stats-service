@@ -2,6 +2,12 @@ package rpc
 
 import (
 	"context"
+	"log"
+	"net"
+	"net/http"
+	"regexp"
+	"strconv"
+
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/pkg/errors"
 	"github.com/qubic/go-node-connector/types"
@@ -17,11 +23,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"log"
-	"net"
-	"net/http"
-	"regexp"
-	"strconv"
 )
 
 type Server struct {
