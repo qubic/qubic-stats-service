@@ -4,15 +4,15 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log"
+	"slices"
+
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pkg/errors"
 	qubic "github.com/qubic/go-node-connector"
 	"github.com/qubic/go-node-connector/types"
 	"github.com/qubic/qubic-stats-api/protobuff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"log"
-	"slices"
 )
 
 type AssetService interface {
@@ -65,7 +65,7 @@ func (s *AssetServiceImpl) GetOwnedAssets(ctx context.Context, issuerIdentity, a
 		var owner types.Identity
 		owner, err := owner.FromPubKey(asset.Asset.PublicKey, false)
 		if err != nil {
-			return nil, 0, -1, errors.Wrap(err, "failed to get identity for public key")
+			return nil, 0, -1, fmt.Errorf("failed to get identity for public key: %w", err)
 		}
 
 		assetOwnership := protobuff.AssetOwnership{
@@ -92,6 +92,10 @@ func (s *AssetServiceImpl) getAssetOwners(ctx context.Context, issuerIdentity, a
 		if err != nil {
 			return nil, err
 		}
+		queriedAssets, err = combineEntriesForSameIdentity(*queriedAssets)
+		if err != nil {
+			return nil, err
+		}
 		if len(*queriedAssets) > 0 {
 			// we only cache queries that return data
 			s.assetOwnerCache.Set(key, queriedAssets, ttlcache.DefaultTTL)
@@ -101,15 +105,46 @@ func (s *AssetServiceImpl) getAssetOwners(ctx context.Context, issuerIdentity, a
 	return assets, nil
 }
 
+// combineEntriesForSameIdentity there might be several entries for one identity and different managing contracts
+func combineEntriesForSameIdentity(ownerships []types.AssetOwnership) (*types.AssetOwnerships, error) {
+	var identityMap = make(map[[32]byte]*types.AssetOwnership)
+
+	// combine multiple ownerships for the same identity into one
+	for _, ownership := range ownerships {
+		val, found := identityMap[ownership.Asset.PublicKey]
+		if !found {
+			identityMap[ownership.Asset.PublicKey] = &ownership
+		} else {
+			val.Asset.NumberOfUnits += ownership.Asset.NumberOfUnits
+		}
+	}
+
+	// create combined ownership list
+	var combined = make(types.AssetOwnerships, 0, len(identityMap))
+	for _, v := range identityMap {
+		combined = append(combined, *v)
+	}
+
+	slices.SortFunc(combined, func(a, b types.AssetOwnership) int {
+		if a.Asset.NumberOfUnits > b.Asset.NumberOfUnits {
+			return -1 // reverse sort
+		} else {
+			return 1
+		}
+	})
+
+	return &combined, nil
+}
+
 func (s *AssetServiceImpl) getAssetOwnersFromNode(ctx context.Context, identity string, name string) (*types.AssetOwnerships, error) {
 	client, err := s.qPool.Get()
 	if err != nil {
-		return nil, errors.Wrap(err, "getting pool connection")
+		return nil, fmt.Errorf("getting pool connection: %w", err)
 	}
 	assets, err := client.GetAssetOwnershipsByFilter(ctx, identity, name, "", 0)
 	if err != nil {
 		_ = s.qPool.Close(client)
-		return nil, errors.Wrap(err, "getting asset ownerships")
+		return nil, fmt.Errorf("getting asset ownerships: %w", err)
 	}
 	err = s.qPool.Put(client)
 	if err != nil {

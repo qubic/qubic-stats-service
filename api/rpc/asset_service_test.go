@@ -3,14 +3,15 @@ package rpc
 import (
 	"context"
 	"encoding/hex"
-	"github.com/jellydator/ttlcache/v3"
-	qubic "github.com/qubic/go-node-connector"
-	"github.com/qubic/go-node-connector/types"
-	"github.com/stretchr/testify/assert"
 	"log"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/jellydator/ttlcache/v3"
+	qubic "github.com/qubic/go-node-connector"
+	"github.com/qubic/go-node-connector/types"
+	"github.com/stretchr/testify/assert"
 )
 
 var tcpServer net.Listener
@@ -128,6 +129,101 @@ func Test_AssetService_GetOwnedAssets_ReturnPaginated(t *testing.T) {
 	assert.Equal(t, 7, total)
 
 	tearDown(t)
+
+}
+
+func Test_AssetService_CombineOwnedAssets(t *testing.T) {
+
+	ownerships := types.AssetOwnerships{
+		{
+			Asset: types.AssetOwnershipData{
+				PublicKey:             [32]byte{7, 8, 9},
+				Type:                  3,
+				Padding:               [1]int8{},
+				ManagingContractIndex: 0,
+				IssuanceIndex:         0,
+				NumberOfUnits:         1000,
+			},
+			Tick:          1,
+			UniverseIndex: 1,
+		},
+		{
+			Asset: types.AssetOwnershipData{
+				PublicKey:             [32]byte{1, 2, 3},
+				Type:                  3,
+				Padding:               [1]int8{},
+				ManagingContractIndex: 1,
+				IssuanceIndex:         1,
+				NumberOfUnits:         1000,
+			},
+			Tick:          1,
+			UniverseIndex: 1,
+		}, {
+			Asset: types.AssetOwnershipData{
+				PublicKey:             [32]byte{6, 6, 6},
+				Type:                  3,
+				Padding:               [1]int8{},
+				ManagingContractIndex: 2,
+				IssuanceIndex:         2,
+				NumberOfUnits:         100,
+			},
+			Tick:          1,
+			UniverseIndex: 2,
+		}, {
+			Asset: types.AssetOwnershipData{
+				PublicKey:             [32]byte{1, 2, 3},
+				Type:                  3,
+				Padding:               [1]int8{},
+				ManagingContractIndex: 3,
+				IssuanceIndex:         3,
+				NumberOfUnits:         10,
+			},
+			Tick:          1,
+			UniverseIndex: 3,
+		},
+	}
+
+	combined, err := combineEntriesForSameIdentity(ownerships)
+	assert.NoError(t, err)
+
+	expected := types.AssetOwnerships{
+		{
+			Asset: types.AssetOwnershipData{
+				PublicKey:             [32]byte{1, 2, 3},
+				Type:                  3,
+				Padding:               [1]int8{},
+				ManagingContractIndex: 1,
+				IssuanceIndex:         1,
+				NumberOfUnits:         1010,
+			},
+			Tick:          1,
+			UniverseIndex: 1,
+		}, {
+			Asset: types.AssetOwnershipData{
+				PublicKey:             [32]byte{7, 8, 9},
+				Type:                  3,
+				Padding:               [1]int8{},
+				ManagingContractIndex: 0,
+				IssuanceIndex:         0,
+				NumberOfUnits:         1000,
+			},
+			Tick:          1,
+			UniverseIndex: 1,
+		}, {
+			Asset: types.AssetOwnershipData{
+				PublicKey:             [32]byte{6, 6, 6},
+				Type:                  3,
+				Padding:               [1]int8{},
+				ManagingContractIndex: 2,
+				IssuanceIndex:         2,
+				NumberOfUnits:         100,
+			},
+			Tick:          1,
+			UniverseIndex: 2,
+		},
+	}
+
+	assert.Equal(t, expected, *combined)
 
 }
 
