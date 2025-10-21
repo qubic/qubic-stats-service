@@ -42,10 +42,11 @@ func run() error {
 			Port     string `conf:"default:27017"`
 			Options  string
 
-			Database           string `conf:"default:qubic_frontend"`
-			SpectrumCollection string `conf:"default:spectrum_data"`
-			DataCollection     string `conf:"default:general_data"`
-			RichListCollection string `conf:"default:rich_list"`
+			Database           string        `conf:"default:qubic_frontend"`
+			SpectrumCollection string        `conf:"default:spectrum_data"`
+			DataCollection     string        `conf:"default:general_data"`
+			RichListCollection string        `conf:"default:rich_list"`
+			Timeout            time.Duration `conf:"default:15s"`
 		}
 		Pool struct {
 			NodeFetcherUrl     string        `conf:"default:http://127.0.0.1:8070/status"`
@@ -93,6 +94,7 @@ func run() error {
 		Hostname:          config.Mongo.Hostname,
 		Port:              config.Mongo.Port,
 		ConnectionOptions: config.Mongo.Options,
+		Timeout:           config.Mongo.Timeout,
 	}
 
 	println("Connecting to database...")
@@ -173,22 +175,21 @@ type MongoConfiguration struct {
 	Hostname          string
 	Port              string
 	ConnectionOptions string
+	Timeout           time.Duration
 }
 
 func (c *MongoConfiguration) AssembleConnectionURI() string {
-
 	return fmt.Sprintf("mongodb://%s:%s@%s:%s/%s", c.Username, c.Password, c.Hostname, c.Port, c.ConnectionOptions)
 }
 
 func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error) {
 
 	serverApi := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
+	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi).SetTimeout(configuration.Timeout)
 	client, err := mongo.Connect(context.Background(), opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating database client")
 	}
 
 	return client, nil
-
 }
