@@ -4,21 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
-	"github.com/qubic/go-archiver/protobuff"
-	"github.com/qubic/qubic-stats-processor/spectrum"
-	"go.mongodb.org/mongo-driver/mongo"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"log"
 	"net/http"
 	"time"
+
+	queryProto "github.com/qubic/archive-query-service/legacy/protobuf"
+	liveProto "github.com/qubic/qubic-http/protobuff"
+	"github.com/qubic/qubic-stats-processor/spectrum"
+	"go.mongodb.org/mongo-driver/mongo"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type Service struct {
-	CoinGeckoToken      string
-	ArchiverGrpcAddress string
+	CoinGeckoToken          string
+	QueryServiceGrpcAddress string
+	LiveServiceGrpcAddress  string
 
 	MongoClient              *mongo.Client
 	MongoDatabase            string
@@ -87,55 +89,68 @@ func (s *Service) scrapeData() (Data, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.ScrapeTimeout)
 	defer cancel()
 
-	connection, err := grpc.NewClient(s.ArchiverGrpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	queryServiceConnection, err := grpc.NewClient(s.QueryServiceGrpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return Data{}, errors.Wrap(err, "creating grpc connection")
+		return Data{}, fmt.Errorf("creating query service grpc connection: %w", err)
 	}
 	defer func(connection *grpc.ClientConn) {
 		err := connection.Close()
 		if err != nil {
-			fmt.Printf("failed to close grpc connection")
+			fmt.Printf("failed to close query service grpc connection")
 		}
-	}(connection)
-	client := protobuff.NewArchiveServiceClient(connection)
+	}(queryServiceConnection)
+	queryServiceClient := queryProto.NewTransactionsServiceClient(queryServiceConnection)
+
+	liveServiceConnection, err := grpc.NewClient(s.LiveServiceGrpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return Data{}, fmt.Errorf("creating live serive grpc connection")
+	}
+	defer func(connection *grpc.ClientConn) {
+		err := connection.Close()
+		if err != nil {
+			fmt.Printf("failed to close live service grpc connection")
+		}
+	}(liveServiceConnection)
+	liveServiceClient := liveProto.NewQubicLiveServiceClient(liveServiceConnection)
 
 	price, err := FetchCoinGeckoPrice(ctx, s.CoinGeckoToken)
 	if err != nil {
-		return Data{}, errors.Wrap(err, "fetching qubic price from coingecko")
+		return Data{}, fmt.Errorf("fetching qubic price from coingecko: %w", err)
 	}
 
 	spectrumData, err := spectrum.LoadSpectrumDataFromDatabase(ctx, s.MongoClient, s.MongoDatabase, s.MongoSpectrumCollection)
 	if err != nil {
 		if s.spectrumData == nil {
-			return Data{}, errors.Wrap(err, "fetching initial spectrum data from database")
+			return Data{}, fmt.Errorf("fetching initial spectrum data from database: %w", err)
 		}
 		fmt.Printf("Failed to update spectrum data: %v", err)
 	}
 
 	marketCap := int64(float64(price) * float64(spectrumData.CirculatingSupply))
 
-	archiverStatus, err := fetchArchiverStatus(client)
+	archiverStatus, err := fetchQueryServiceStatus(ctx, queryServiceClient)
 	if err != nil {
-		return Data{}, errors.Wrap(err, "fetching archiver status")
+		return Data{}, fmt.Errorf("fetching query service archiver status: %w", err)
 	}
 
 	epoch := archiverStatus.LastProcessedTick.Epoch
 
-	latestTick, err := fetchLatestTick(client)
+	latestTick, err := fetchLiveServiceNetworkTick(ctx, liveServiceClient)
 	if err != nil {
-		return Data{}, errors.Wrap(err, "fetching latest tick")
+		return Data{}, fmt.Errorf("fetching live service latest tick: %w", err)
 	}
 
-	epochStartingTick, err := getEpochStartingTick(archiverStatus, epoch)
+	ticksThisEpoch, err := fetchQueryServiceEpochTotalTickCount(ctx, queryServiceClient, epoch)
 	if err != nil {
-		return Data{}, errors.Wrap(err, "getting starting tick for current interval")
+		return Data{}, fmt.Errorf("fetching query service tick count for epoch %d: %w", epoch, err)
 	}
-
-	ticksThisEpoch := latestTick - epochStartingTick
 
 	burnedQUs := (uint64(epoch) * uint64(1000000000000)) - uint64(spectrumData.CirculatingSupply)
 
-	emptyTickCount := archiverStatus.EmptyTicksPerEpoch[epoch]
+	emptyTickCount, err := fetchQueryServiceEpochEmptyTickCount(ctx, queryServiceClient, epoch)
+	if err != nil {
+		return Data{}, fmt.Errorf("fetching query service empty tick count for epoch %d: %w", epoch, err)
+	}
 
 	goodTicks := ticksThisEpoch - emptyTickCount
 
@@ -147,8 +162,8 @@ func (s *Service) scrapeData() (Data, error) {
 		MarketCap:                marketCap,
 		Epoch:                    epoch,
 		CurrentTick:              latestTick,
-		TicksInCurrentEpoch:      ticksThisEpoch,
-		EmptyTicksInCurrentEpoch: emptyTickCount,
+		TicksInCurrentEpoch:      uint32(ticksThisEpoch), // the code originally uses uint32 here
+		EmptyTicksInCurrentEpoch: uint32(emptyTickCount), // I am not currently sure of the implications related to changing the data type to normal int
 		EpochTickQuality:         tickQuality,
 		BurnedQUs:                burnedQUs,
 	}
@@ -161,45 +176,49 @@ func (s *Service) saveData(data Data) error {
 	collection := s.MongoClient.Database(s.MongoDatabase).Collection(s.MongoQubicDataCollection)
 	_, err := collection.InsertOne(context.Background(), data)
 	if err != nil {
-		return errors.Wrap(err, "inserting data in collection")
+		return fmt.Errorf("inserting data in collection: %w", err)
 	}
 
 	return nil
 }
 
-func fetchArchiverStatus(client protobuff.ArchiveServiceClient) (*protobuff.GetStatusResponse, error) {
-
-	status, err := client.GetStatus(context.Background(), nil)
+func fetchQueryServiceStatus(ctx context.Context, client queryProto.TransactionsServiceClient) (*queryProto.GetArchiverStatusResponse, error) {
+	status, err := client.GetArchiverStatus(ctx, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "getting archiver status")
+		return nil, fmt.Errorf("getting query service processed tick intervals: %w", err)
 	}
+
 	return status, nil
-
 }
 
-func fetchLatestTick(client protobuff.ArchiveServiceClient) (uint32, error) {
-	latestTick, err := client.GetLatestTick(context.Background(), nil)
+func fetchQueryServiceEpochTotalTickCount(ctx context.Context, client queryProto.TransactionsServiceClient, epoch uint32) (int32, error) {
+	tickListResponse, err := client.GetEpochTickListV2(ctx, &queryProto.GetEpochTickListRequestV2{
+		Epoch: epoch,
+	})
 	if err != nil {
-		return 0, errors.Wrap(err, "getting latest tick")
+		return 0, fmt.Errorf("fetching query service tick list")
 	}
-	return latestTick.LatestTick, nil
+
+	return tickListResponse.Pagination.TotalRecords, nil
 }
 
-func getEpochStartingTick(archiverStatus *protobuff.GetStatusResponse, epoch uint32) (uint32, error) {
-	intervals := archiverStatus.ProcessedTickIntervalsPerEpoch
-
-	// we start from the bottom because this function will usually wil be used for the latest epoch
-	for i := len(intervals) - 1; i >= 0; i-- {
-		interval := intervals[i]
-		if interval.Epoch != epoch {
-			continue
-		}
-		startingTick := interval.Intervals[0].InitialProcessedTick
-		return startingTick, nil
+func fetchQueryServiceEpochEmptyTickCount(ctx context.Context, client queryProto.TransactionsServiceClient, epoch uint32) (int32, error) {
+	emptyTickListResponse, err := client.GetEmptyTickListV2(ctx, &queryProto.GetEpochEmptyTickListRequestV2{
+		Epoch: epoch,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("fetching query service empty tick list")
 	}
 
-	return 0, errors.New("Could not find the specified epoch")
+	return emptyTickListResponse.Pagination.TotalRecords, nil
+}
 
+func fetchLiveServiceNetworkTick(ctx context.Context, client liveProto.QubicLiveServiceClient) (uint32, error) {
+	tickInfo, err := client.GetTickInfo(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("getting live serivice tick info: %w", err)
+	}
+	return tickInfo.TickInfo.Tick, nil
 }
 
 type coinGeckoResponse struct {
@@ -214,7 +233,7 @@ func FetchCoinGeckoPrice(ctx context.Context, token string) (float32, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return 0, errors.Wrap(err, "creating request")
+		return 0, fmt.Errorf("creating request: %w", err)
 	}
 
 	req.Header.Add("accept", "application/json")
@@ -222,19 +241,19 @@ func FetchCoinGeckoPrice(ctx context.Context, token string) (float32, error) {
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0, errors.Wrap(err, "executing request")
+		return 0, fmt.Errorf("executing request: %w", err)
 	}
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return 0, errors.Wrap(err, "reading request response")
+		return 0, fmt.Errorf("reading request response: %w", err)
 	}
 
 	var response coinGeckoResponse
 	err = json.Unmarshal(body, &response)
 	if err != nil {
-		return 0, errors.Wrap(err, "unmarshalling response")
+		return 0, fmt.Errorf("unmarshalling response: %w", err)
 	}
 
 	return response.QubicNetwork.Usd, nil
