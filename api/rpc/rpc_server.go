@@ -70,7 +70,8 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 		return nil, status.Errorf(codes.FailedPrecondition, "page size must be between 1 and %d", s.richListPageSize)
 	}
 
-	page := request.Page
+	page := int(request.Page)
+	pageSize := int(request.PageSize)
 
 	if page == 0 {
 		page = 1
@@ -79,22 +80,17 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 	epoch := s.cache.GetQubicData().Epoch
 	epochString := strconv.Itoa(int(epoch))
 
-	data := s.cache.GetEpochPaginationData(epochString)
+	totalRecords := s.cache.GetSpectrumData().ActiveAddresses
 
-	if data == cache.EmptyPaginationData {
-		return nil, status.Errorf(codes.NotFound, "could not find the rich list for the specified epoch")
-	}
-
-	totalRecords := data.RichListLength
-	pageCount := totalRecords / request.PageSize
-	if totalRecords%request.PageSize != 0 {
+	pageCount := totalRecords / pageSize
+	if totalRecords%pageSize != 0 {
 		pageCount += 1
 	}
 
 	if page <= 0 || page > pageCount {
 		return nil, status.Errorf(codes.Internal, "cannot find specified page. last page: %d", pageCount)
 	}
-	start := (page - 1) * request.PageSize
+	start := (page - 1) * pageSize
 
 	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + epochString)
 	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(request.PageSize)).SetSort(bson.D{{"balance", -1}})
@@ -121,9 +117,9 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 
 	return &protobuff.GetRichListSliceResponse{
 		Pagination: &protobuff.Pagination{
-			CurrentPage:  page,
-			TotalPages:   pageCount,
-			TotalRecords: totalRecords,
+			CurrentPage:  int32(page),
+			TotalPages:   int32(pageCount),
+			TotalRecords: int32(totalRecords),
 			PageSize:     request.PageSize,
 		},
 		Epoch: epoch,

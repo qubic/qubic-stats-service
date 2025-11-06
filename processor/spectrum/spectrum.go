@@ -6,13 +6,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
-	"github.com/qubic/go-node-connector/types"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 	"os"
 	"slices"
 	"time"
+
+	"github.com/pkg/errors"
+	"github.com/qubic/go-node-connector/types"
+	"github.com/schollz/progressbar/v3"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 var EmptyAddress [32]byte
@@ -38,8 +40,12 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 	var activeAddresses int
 
 	var richList RichList
+	spectrumLength := len(*spectrum)
+
+	bar := progressbar.Default(int64(spectrumLength), "Processing spectrum data")
 
 	for index, entity := range *spectrum {
+		_ = bar.Add(1)
 		entityBalance, err := entity.GetBalance()
 		if err != nil {
 			return nil, errors.Wrapf(err, "getting balance of entity #%d", index)
@@ -60,7 +66,6 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 				Identity: identity.String(),
 			}
 			richList = append(richList, richListEntity)
-			fmt.Printf("DATA: %v\n", richListEntity)
 		}
 
 	}
@@ -83,7 +88,7 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 	}, nil
 }
 
-func ReadSpectrumFromFile(filePath string, spectrumSize int64) (*Spectrum, error) {
+func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
 
 	println("Reading spectrum...")
 
@@ -92,15 +97,19 @@ func ReadSpectrumFromFile(filePath string, spectrumSize int64) (*Spectrum, error
 		return nil, errors.Wrap(err, "reading spectrum file")
 	}
 
-	if len(fileData)%64 != 0 {
-		return nil, errors.New("Spectrum file may be incomplete! fileLength % 64 != 0")
+	spectrumFileLength := len(fileData)
+
+	if spectrumFileLength%entitySize != 0 {
+		return nil, fmt.Errorf("spectrum file may be incomplete. fileLength mod %d != 0", entitySize)
 	}
 
-	fmt.Printf("Spectrum file size: %d\n", len(fileData))
+	fmt.Printf("Spectrum file size: %d\n", spectrumFileLength)
+
+	entityCount := spectrumFileLength / entitySize
 
 	var spectrum Spectrum
 
-	for index := range spectrumSize {
+	for index := range entityCount {
 
 		beginningIndex := index * 64
 		endingIndex := beginningIndex + 64

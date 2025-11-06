@@ -5,13 +5,6 @@ import (
 	"time"
 )
 
-var EmptyPaginationData = RichListPaginationData{}
-
-type RichListPaginationData struct {
-	RichListLength    int32
-	RichListPageCount int32
-}
-
 type Cache struct {
 	mutexLock sync.RWMutex
 
@@ -20,8 +13,6 @@ type Cache struct {
 
 	spectrumData           SpectrumData
 	lastSpectrumDataUpdate time.Time
-
-	richListPaginationDataPerEpoch map[string]RichListPaginationData
 }
 
 func (c *Cache) UpdateDataCache(spectrumData SpectrumData, qubicData QubicData) {
@@ -61,18 +52,4 @@ func (c *Cache) GetLastSpectrumDataUpdate() time.Time {
 	defer c.mutexLock.RUnlock()
 
 	return c.lastSpectrumDataUpdate
-}
-
-func (c *Cache) SetEpochPaginationData(epoch string, data RichListPaginationData) {
-	c.mutexLock.Lock()
-	defer c.mutexLock.Unlock()
-
-	c.richListPaginationDataPerEpoch[epoch] = data
-}
-
-func (c *Cache) GetEpochPaginationData(epoch string) RichListPaginationData {
-	c.mutexLock.RLock()
-	defer c.mutexLock.RUnlock()
-
-	return c.richListPaginationDataPerEpoch[epoch]
 }

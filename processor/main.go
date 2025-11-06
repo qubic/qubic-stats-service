@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/qubic/qubic-stats-processor/service"
 	"github.com/qubic/qubic-stats-processor/spectrum"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -24,7 +24,6 @@ type Configuration struct {
 		Mode string `conf:"default:service"`
 	}
 	SpectrumParser struct {
-		SpectrumSize string `conf:"default:16777216"`
 		SpectrumFile string `conf:"default:./latest.118"`
 		OutputMode   string `conf:"default:db"`
 		OutputFile   string `conf:"default:spectrumData.json"`
@@ -164,12 +163,7 @@ func run() error {
 
 		println("Spectrum parser")
 
-		spectrumSize, err := strconv.ParseInt(config.SpectrumParser.SpectrumSize, 10, 64)
-		if err != nil {
-			return errors.Wrap(err, "parsing spectrum size")
-		}
-
-		s, err := spectrum.ReadSpectrumFromFile(config.SpectrumParser.SpectrumFile, spectrumSize)
+		s, err := spectrum.ReadSpectrumFromFile(config.SpectrumParser.SpectrumFile)
 		if err != nil {
 			return errors.Wrap(err, "loading spectrum from file")
 		}
@@ -220,15 +214,39 @@ func run() error {
 			return errors.Wrap(err, "saving spectrum data")
 		}
 
+		err = purgeOldEpochCollections(client, config.Mongo.Database, config.Mongo.RichListCollection)
+		if err != nil {
+			return fmt.Errorf("purging old epoch rich lists: %w", err)
+		}
+
 		err = spectrum.SaveRichListToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.RichListCollection+"_"+epoch, results.List)
 
 		latestData, err := spectrum.LoadSpectrumDataFromDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
 
-		fmt.Printf("Latest data: %d, %d %d", latestData.CirculatingSupply, latestData.ActiveAddresses, latestData.Timestamp)
-
+		fmt.Printf("Latest data read from db: Circ supply: %d, Active addr: %d Update timestamp: %d\n", latestData.CirculatingSupply, latestData.ActiveAddresses, latestData.Timestamp)
 		break
 	}
 
+	return nil
+}
+
+func purgeOldEpochCollections(mongoClient *mongo.Client, database string, spectrumCollectionBase string) error {
+
+	db := mongoClient.Database(database)
+	collections, err := db.ListCollectionNames(context.Background(), bson.D{})
+	if err != nil {
+		return fmt.Errorf("getting list of mongo collection names: %w", err)
+	}
+
+	for _, c := range collections {
+		if strings.Contains(c, spectrumCollectionBase) {
+			err := db.Collection(c).Drop(context.Background())
+			if err != nil {
+				return fmt.Errorf("dropping collection %s: %w", c, err)
+			}
+			fmt.Printf("Dropped epoch rich list collection: %s\n", c)
+		}
+	}
 	return nil
 }
 
