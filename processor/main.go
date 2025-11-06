@@ -3,17 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/ardanlabs/conf"
 	"github.com/pkg/errors"
 	"github.com/qubic/qubic-stats-processor/service"
 	"github.com/qubic/qubic-stats-processor/spectrum"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"log"
-	"os"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const prefix = "QUBIC_STATS_PROCESSOR"
@@ -29,7 +30,8 @@ type Configuration struct {
 		OutputFile   string `conf:"default:spectrumData.json"`
 	}
 	Service struct {
-		ArchiverGrpcAddress string `conf:"default:localhost:8001"`
+		QueryServiceGrpcAddress string `conf:"default:localhost:8001"`
+		LiveServiceGrpcAddress  string `conf:"default:localhost:8002"`
 
 		CoinGeckoToken     string        `cong:"default:XXXXXXXXXXXXXXXXXXXXX"`
 		DataScrapeInterval time.Duration `conf:"default:1m"`
@@ -139,8 +141,9 @@ func run() error {
 		}()
 
 		s := service.Service{
-			CoinGeckoToken:      config.Service.CoinGeckoToken,
-			ArchiverGrpcAddress: config.Service.ArchiverGrpcAddress,
+			CoinGeckoToken:          config.Service.CoinGeckoToken,
+			QueryServiceGrpcAddress: config.Service.QueryServiceGrpcAddress,
+			LiveServiceGrpcAddress:  config.Service.LiveServiceGrpcAddress,
 
 			MongoClient:              client,
 			MongoDatabase:            config.Mongo.Database,
