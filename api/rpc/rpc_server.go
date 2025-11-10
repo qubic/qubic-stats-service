@@ -37,6 +37,7 @@ type Server struct {
 	mongoRichListCollection string
 
 	richListPageSize int32
+	richListLimit    int
 
 	assetService AssetService
 }
@@ -80,7 +81,8 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 	epoch := s.cache.GetQubicData().Epoch
 	epochString := strconv.Itoa(int(epoch))
 
-	totalRecords := s.cache.GetSpectrumData().ActiveAddresses
+	dbRecordCount := s.cache.GetSpectrumData().ActiveAddresses
+	totalRecords := min(dbRecordCount, s.richListLimit)
 
 	pageCount := totalRecords / pageSize
 	if totalRecords%pageSize != 0 {
@@ -298,7 +300,7 @@ func (s *Server) Start() error {
 
 }
 
-func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, assetService *AssetServiceImpl, richListCollection string, richListPageSize int32) *Server {
+func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, assetService *AssetServiceImpl, richListCollection string, richListPageSize int32, richListLimit int) *Server {
 	return &Server{
 		httpAddress:             httpAddress,
 		grpcAddress:             grpcAddress,
@@ -308,5 +310,6 @@ func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbCli
 		mongoRichListCollection: richListCollection,
 		richListPageSize:        richListPageSize,
 		assetService:            assetService,
+		richListLimit:           richListLimit,
 	}
 }
