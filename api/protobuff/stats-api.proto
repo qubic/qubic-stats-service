@@ -42,9 +42,12 @@ message RichList {
 
 message GetRichListSliceRequest {
   int32 page = 1;
+
+  // Value must be between 1 and 100
   int32 page_size = 2;
 
 }
+
 message GetRichListSliceResponse {
   Pagination pagination = 1;
   uint32 epoch = 2;
@@ -79,12 +82,14 @@ message GetLatestDataResponse {
 
 service StatsService {
 
+  // Returns the latest available chain information.
   rpc GetLatestData(google.protobuf.Empty) returns (GetLatestDataResponse) {
     option (google.api.http) = {
       get: "/v1/latest-stats"
     };
   };
 
+  // Returns the list of top holders in the Qubic network.
   rpc GetRichListSlice(GetRichListSliceRequest) returns (GetRichListSliceResponse) {
     option (google.api.http) = {
       get: "/v1/rich-list"
