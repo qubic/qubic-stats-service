@@ -79,6 +79,11 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 
 	pageNumber := max(0, int(request.Page)-1) // API index starts with 1, implementation index starts with 0
 	start := pageNumber * pageSize
+	limit := pageSize
+
+	if start+limit > s.richListLimit {
+		limit -= (start + limit) - s.richListLimit // ensure that we are not requesting records than the limit for the last page
+	}
 
 	epoch := s.cache.GetQubicData().Epoch
 	epochString := strconv.Itoa(int(epoch))
@@ -95,7 +100,7 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 	}
 
 	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + epochString)
-	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(pageSize)).SetSort(bson.D{{"balance", -1}}) // Query database for index start to start + pageSize and sort desc
+	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(limit)).SetSort(bson.D{{"balance", -1}}) // Query database for index start to start + pageSize and sort desc
 
 	cursor, err := collection.Find(ctx, bson.D{{}}, findOptions)
 	if err != nil {
