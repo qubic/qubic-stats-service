@@ -3,8 +3,9 @@ package spectrum
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"github.com/pkg/errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type Entity struct {
@@ -19,6 +20,8 @@ type Entity struct {
 	latestIncomingTick uint32
 	latestOutgoingTick uint32
 }
+
+const entitySize = 64 // 32 + 8 + 8 + 4 + 4 + 4 + 4
 
 func (e *Entity) GetPublicKeyString() string {
 	return hex.EncodeToString(e.publicKey[:])

@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -38,17 +37,14 @@ type Service struct {
 	cacheValidityDuration    time.Duration
 	spectrumValidityDuration time.Duration
 
-	lastRichListCacheUpdate time.Time
-	cacheUpdateTimeout      time.Duration
+	cacheUpdateTimeout time.Duration
 
 	richListPageSize int32
 }
 
 func NewCacheService(configuration *ServiceConfiguration, mongoClient *mongo.Client) *Service {
 	return &Service{
-		Cache: &Cache{
-			richListPaginationDataPerEpoch: make(map[string]RichListPaginationData),
-		},
+		Cache: &Cache{},
 
 		mongoClient:              mongoClient,
 		mongoDatabase:            configuration.MongoDatabase,
@@ -122,13 +118,6 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 
 	s.Cache.UpdateDataCache(spectrumData, qubicData)
 
-	if time.Since(s.lastRichListCacheUpdate) > 5*time.Minute {
-		err = s.calculateRichListCache(ctx)
-		if err != nil {
-			return errors.Wrap(err, "calculating rich list length and page count")
-		}
-	}
-
 	return nil
 }
 
@@ -146,46 +135,6 @@ func (s *Service) fetchSpectrumData(ctx context.Context) (SpectrumData, error) {
 	}
 
 	return spectrumData, nil
-}
-
-func (s *Service) calculateRichListCache(ctx context.Context) error {
-
-	database := s.mongoClient.Database(s.mongoDatabase)
-	collections, err := database.ListCollectionNames(ctx, bson.D{})
-	if err != nil {
-		return errors.Wrap(err, "getting database collections")
-	}
-
-	for _, c := range collections {
-		if strings.Contains(c, "rich_list_") {
-
-			epoch := strings.Split(c, "_")[2]
-
-			collection := s.mongoClient.Database(s.mongoDatabase).Collection(c)
-
-			count, err := collection.CountDocuments(ctx, bson.D{}, options.Count().SetHint("_id_"))
-			if err != nil {
-				return errors.Wrap(err, "getting rich list length")
-			}
-
-			pageCount := int32(count) / s.richListPageSize
-			remainder := int32(count) % s.richListPageSize
-			if remainder != 0 {
-				pageCount += 1
-			}
-
-			data := RichListPaginationData{
-				RichListLength:    int32(count),
-				RichListPageCount: pageCount,
-			}
-			s.Cache.SetEpochPaginationData(epoch, data)
-
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	return nil
-
 }
 
 func (s *Service) fetchQubicData(ctx context.Context) (QubicData, error) {

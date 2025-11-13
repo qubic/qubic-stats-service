@@ -37,6 +37,7 @@ type Server struct {
 	mongoRichListCollection string
 
 	richListPageSize int32
+	richListLimit    int
 
 	assetService AssetService
 }
@@ -66,42 +67,39 @@ func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.
 
 func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRichListSliceRequest) (*protobuff.GetRichListSliceResponse, error) {
 
-	if request.PageSize <= 0 || request.PageSize > s.richListPageSize {
-		return nil, status.Errorf(codes.FailedPrecondition, "page size must be between 1 and %d", s.richListPageSize)
+	var pageSize int
+	if request.PageSize > s.richListPageSize {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid page size (maximum is %d).", s.richListPageSize)
+	}
+	if request.PageSize == 0 {
+		pageSize = int(defaultPageSize)
+	} else {
+		pageSize = int(request.PageSize)
 	}
 
-	page := request.Page
-
-	if page == 0 {
-		page = 1
-	}
+	pageNumber := max(0, int(request.Page)-1) // API index starts with 1, implementation index starts with 0
+	start := pageNumber * pageSize
 
 	epoch := s.cache.GetQubicData().Epoch
 	epochString := strconv.Itoa(int(epoch))
 
-	data := s.cache.GetEpochPaginationData(epochString)
+	dbRecordCount := s.cache.GetSpectrumData().ActiveAddresses
+	totalRecords := min(dbRecordCount, s.richListLimit) // we do not want to expose the full rich list
 
-	if data == cache.EmptyPaginationData {
-		return nil, status.Errorf(codes.NotFound, "could not find the rich list for the specified epoch")
+	pagination, err := getPaginationInformation(totalRecords, pageNumber+1, pageSize)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "creating pagination info")
 	}
-
-	totalRecords := data.RichListLength
-	pageCount := totalRecords / request.PageSize
-	if totalRecords%request.PageSize != 0 {
-		pageCount += 1
+	if pageNumber+1 > int(pagination.TotalPages) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid page for current page size (maximum is %d)", pagination.TotalPages)
 	}
-
-	if page <= 0 || page > pageCount {
-		return nil, status.Errorf(codes.Internal, "cannot find specified page. last page: %d", pageCount)
-	}
-	start := (page - 1) * request.PageSize
 
 	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + epochString)
-	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(request.PageSize)).SetSort(bson.D{{"balance", -1}})
+	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(pageSize)).SetSort(bson.D{{"balance", -1}}) // Query database for index start to start + pageSize and sort desc
 
 	cursor, err := collection.Find(ctx, bson.D{{}}, findOptions)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "cannot get rich list slice from the database. error: %v", err)
+		return nil, status.Errorf(codes.Internal, "cannot get rich list section from the database. error: %v", err)
 	}
 
 	var results cache.RichList
@@ -120,13 +118,8 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 	}
 
 	return &protobuff.GetRichListSliceResponse{
-		Pagination: &protobuff.Pagination{
-			CurrentPage:  page,
-			TotalPages:   pageCount,
-			TotalRecords: totalRecords,
-			PageSize:     request.PageSize,
-		},
-		Epoch: epoch,
+		Pagination: pagination,
+		Epoch:      epoch,
 		RichList: &protobuff.RichList{
 			Entities: list,
 		},
@@ -302,7 +295,7 @@ func (s *Server) Start() error {
 
 }
 
-func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, assetService *AssetServiceImpl, richListCollection string, richListPageSize int32) *Server {
+func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbClient *mongo.Client, database string, assetService *AssetServiceImpl, richListCollection string, richListPageSize int32, richListLimit int) *Server {
 	return &Server{
 		httpAddress:             httpAddress,
 		grpcAddress:             grpcAddress,
@@ -312,5 +305,6 @@ func NewServer(httpAddress string, grpcAddress string, cache *cache.Cache, dbCli
 		mongoRichListCollection: richListCollection,
 		richListPageSize:        richListPageSize,
 		assetService:            assetService,
+		richListLimit:           richListLimit,
 	}
 }

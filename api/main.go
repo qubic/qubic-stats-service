@@ -35,6 +35,7 @@ func run() error {
 			SpectrumDataUpdateInterval time.Duration `conf:"default:24h"`
 			RichListPageSize           int32         `conf:"default:100"`
 			CacheUpdateTimeout         time.Duration `conf:"default:30s"`
+			RichListLimit              int           `conf:"default:10000"`
 		}
 		Mongo struct {
 			Username string `conf:"default:user"`
@@ -160,6 +161,7 @@ func run() error {
 		assetsService,
 		config.Mongo.RichListCollection,
 		config.Service.RichListPageSize,
+		config.Service.RichListLimit,
 	)
 	err = server.Start()
 	if err != nil {
