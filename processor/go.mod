@@ -11,7 +11,10 @@ require (
 	google.golang.org/grpc v1.76.0
 )
 
-require github.com/pkg/errors v0.9.1
+require (
+	github.com/pkg/errors v0.9.1
+	github.com/schollz/progressbar/v3 v3.18.0
+)
 
 require (
 	github.com/bits-and-blooms/bitset v1.24.3 // indirect
@@ -25,7 +28,6 @@ require (
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/qubic/go-schnorrq v1.0.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/schollz/progressbar/v3 v3.18.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect

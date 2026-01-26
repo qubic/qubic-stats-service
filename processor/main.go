@@ -163,15 +163,24 @@ func run() error {
 
 		println("Spectrum parser")
 
+		//start := time.Now()
+
 		s, err := spectrum.ReadSpectrumFromFile(config.SpectrumParser.SpectrumFile)
 		if err != nil {
 			return errors.Wrap(err, "loading spectrum from file")
 		}
 
+		//elapsed := time.Since(start)
+		//fmt.Printf("Spectrum file read took: %s\n", elapsed.String())
+		//start = time.Now()
+
 		results, err := spectrum.CalculateSpectrumData(s)
 		if err != nil {
 			return errors.Wrap(err, "calculating spectrum data")
 		}
+
+		//elapsed = time.Since(start)
+		//fmt.Printf("Spectrum file read took: %s\n", elapsed.String())
 
 		if config.SpectrumParser.OutputMode == "file" {
 			err = results.Data.SaveSpectrumDataToFile(config.SpectrumParser.OutputFile)

@@ -124,7 +124,10 @@ func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
 			return nil, errors.Wrapf(err, "deserializing %dth spectrum entity", index)
 		}
 
-		spectrum = append(spectrum, entity)
+		if entity.publicKey != EmptyAddress {
+			spectrum = append(spectrum, entity)
+		}
+
 	}
 
 	return &spectrum, nil
