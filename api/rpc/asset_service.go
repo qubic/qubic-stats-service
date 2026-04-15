@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"fmt"
@@ -41,7 +42,10 @@ func (s *AssetServiceImpl) GetOwnedAssets(ctx context.Context, issuerIdentity, a
 	assets := *retrievedAssets
 
 	slices.SortFunc(assets, func(a, b types.AssetOwnership) int {
-		return -cmp.Compare(a.Asset.NumberOfUnits, b.Asset.NumberOfUnits)
+		if c := -cmp.Compare(a.Asset.NumberOfUnits, b.Asset.NumberOfUnits); c != 0 {
+			return c
+		}
+		return bytes.Compare(a.Asset.PublicKey[:], b.Asset.PublicKey[:])
 	})
 
 	start := int(page.Page) * int(page.Size)
@@ -116,14 +120,6 @@ func combineEntriesForSameIdentity(ownerships []types.AssetOwnership) (*types.As
 	for _, v := range identityMap {
 		combined = append(combined, *v)
 	}
-
-	slices.SortFunc(combined, func(a, b types.AssetOwnership) int {
-		if a.Asset.NumberOfUnits > b.Asset.NumberOfUnits {
-			return -1 // reverse sort
-		} else {
-			return 1
-		}
-	})
 
 	return &combined, nil
 }
