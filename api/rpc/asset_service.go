@@ -4,12 +4,11 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"log"
 	"slices"
 
 	"github.com/jellydator/ttlcache/v3"
-	qubic "github.com/qubic/go-node-connector"
 	"github.com/qubic/go-node-connector/types"
+	"github.com/qubic/qubic-stats-api/live"
 	"github.com/qubic/qubic-stats-api/protobuff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -20,22 +19,15 @@ type AssetService interface {
 }
 
 type AssetServiceImpl struct {
-	qPool           ClientPool
+	fetcher         live.AssetFetcher
 	assetOwnerCache *ttlcache.Cache[string, *types.AssetOwnerships]
 }
 
-type ClientPool interface {
-	Get() (*qubic.Client, error)
-	Close(*qubic.Client) error
-	Put(*qubic.Client) error
-}
-
-func NewAssetService(qPool ClientPool, assetOwnersCache *ttlcache.Cache[string, *types.AssetOwnerships]) *AssetServiceImpl {
-	service := AssetServiceImpl{
-		qPool:           qPool,
+func NewAssetService(fetcher live.AssetFetcher, assetOwnersCache *ttlcache.Cache[string, *types.AssetOwnerships]) *AssetServiceImpl {
+	return &AssetServiceImpl{
+		fetcher:         fetcher,
 		assetOwnerCache: assetOwnersCache,
 	}
-	return &service
 }
 
 const ownersCacheKey string = "owners:%s:%s"
@@ -88,7 +80,7 @@ func (s *AssetServiceImpl) getAssetOwners(ctx context.Context, issuerIdentity, a
 		assets = s.assetOwnerCache.Get(key).Value()
 	}
 	if assets == nil {
-		queriedAssets, err := s.getAssetOwnersFromNode(ctx, issuerIdentity, assetName)
+		queriedAssets, err := s.fetcher.GetAssetOwnerships(ctx, issuerIdentity, assetName)
 		if err != nil {
 			return nil, err
 		}
@@ -134,23 +126,6 @@ func combineEntriesForSameIdentity(ownerships []types.AssetOwnership) (*types.As
 	})
 
 	return &combined, nil
-}
-
-func (s *AssetServiceImpl) getAssetOwnersFromNode(ctx context.Context, identity string, name string) (*types.AssetOwnerships, error) {
-	client, err := s.qPool.Get()
-	if err != nil {
-		return nil, fmt.Errorf("getting pool connection: %w", err)
-	}
-	assets, err := client.GetAssetOwnershipsByFilter(ctx, identity, name, "", 0)
-	if err != nil {
-		_ = s.qPool.Close(client)
-		return nil, fmt.Errorf("getting asset ownerships: %w", err)
-	}
-	err = s.qPool.Put(client)
-	if err != nil {
-		log.Printf("WARN: error returning client to pool: %v", err)
-	}
-	return &assets, nil
 }
 
 func cacheKey(issuerIdentity, assetName string) string {
