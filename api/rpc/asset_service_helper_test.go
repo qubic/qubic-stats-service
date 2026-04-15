@@ -7,6 +7,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func Test_AssetService_CacheKey(t *testing.T) {
+	got := cacheKey("ISSUER", "ASSET")
+	want := "owners:ISSUER:ASSET"
+	if got != want {
+		t.Errorf("cacheKey() = %q, want %q", got, want)
+	}
+}
+
 func Test_AssetService_CombineOwnedAssets(t *testing.T) {
 
 	ownerships := types.AssetOwnerships{
