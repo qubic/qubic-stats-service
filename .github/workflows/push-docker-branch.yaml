@@ -3,7 +3,7 @@ name: Deploy dev images to GHCR
 on:
   push:
     branches:
-      - 'bugfix/asset-shares-data-type'
+      - 'bugfix/sort-assets'
 
 jobs:
   push-store-image:
@@ -21,7 +21,7 @@ jobs:
 
       - name: 'Build Inventory Image'
         run: |
-          docker build processor --tag ghcr.io/qubic/qubic-stats-processor:assets
-          docker push ghcr.io/qubic/qubic-stats-processor:assets
-          docker build api --tag ghcr.io/qubic/qubic-stats-api:assets
-          docker push ghcr.io/qubic/qubic-stats-api:assets
+          docker build processor --tag ghcr.io/qubic/qubic-stats-processor:snapshot
+          docker push ghcr.io/qubic/qubic-stats-processor:snapshot
+          docker build api --tag ghcr.io/qubic/qubic-stats-api:snapshot
+          docker push ghcr.io/qubic/qubic-stats-api:snapshot

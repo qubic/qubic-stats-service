@@ -13,6 +13,7 @@ import (
 	qubic "github.com/qubic/go-node-connector"
 	"github.com/qubic/go-node-connector/types"
 	"github.com/qubic/qubic-stats-api/cache"
+	"github.com/qubic/qubic-stats-api/live"
 	"github.com/qubic/qubic-stats-api/rpc"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -51,7 +52,7 @@ func run() error {
 			Timeout            time.Duration `conf:"default:15s"`
 		}
 		Pool struct {
-			NodeFetcherUrl     string        `conf:"default:http://127.0.0.1:8070/status"`
+			NodeFetcherUrl     string        `conf:"default:http://127.0.0.1:8080/status"`
 			NodeFetcherTimeout time.Duration `conf:"default:2s"`
 			NodePort           string        `conf:"default:21841"`
 			InitialCap         int           `conf:"default:5"`
@@ -149,7 +150,8 @@ func run() error {
 	)
 	go assetOwnersCache.Start()
 	log.Printf("Created cache for asset owners with ttl [%s]", config.AssetService.Ttl)
-	assetsService := rpc.NewAssetService(pool, assetOwnersCache)
+	assetFetcher := live.NewAssetClient(pool)
+	assetsService := rpc.NewAssetService(assetFetcher, assetOwnersCache)
 	log.Print("Created assets service.")
 
 	server := rpc.NewServer(

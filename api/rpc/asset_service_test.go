@@ -2,290 +2,236 @@ package rpc
 
 import (
 	"context"
-	"encoding/hex"
-	"log"
-	"net"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	qubic "github.com/qubic/go-node-connector"
 	"github.com/qubic/go-node-connector/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-var tcpServer net.Listener
-var assetService *AssetServiceImpl
-var assetOwnersCache *ttlcache.Cache[string, *types.AssetOwnerships]
-
-var clientPoolCount = 0
-
-type FakePool struct {
+// stubFetcher implements live.AssetFetcher for testing.
+type stubFetcher struct {
+	ownerships *types.AssetOwnerships
+	err        error
+	callCount  int
 }
 
-func (f FakePool) Get() (*qubic.Client, error) {
-
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", "12345"), time.Second)
-	if err != nil {
-		log.Fatal("creating connection")
-	}
-	client, err := qubic.NewClientWithConn(context.Background(), conn)
-	if err != nil {
-		log.Fatal("creating client")
-	}
-
-	clientPoolCount++
-	return client, nil
+func (s *stubFetcher) GetAssetOwnerships(_ context.Context, _, _ string) (*types.AssetOwnerships, error) {
+	s.callCount++
+	return s.ownerships, s.err
 }
 
-func (f FakePool) Put(*qubic.Client) error {
-	return nil
-}
-
-func (f FakePool) Close(*qubic.Client) error {
-	return nil
-}
-
-func Test_AssetService_GetOwnedAssets_ReturnAll(t *testing.T) {
-
-	setup(t)
-
-	assets, tick, total, err := assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
-		Pageable{Page: 0, Size: 10})
-	assert.NoError(t, err)
-	assert.Len(t, assets, 7)
-	assert.Equal(t, 22014071, int(tick))
-	assert.Equal(t, 7, total)
-
-	tearDown(t)
-
-}
-
-func Test_AssetService_GetOwnedAssets_CacheResponse(t *testing.T) {
-
-	setup(t)
-
-	clientPoolCount = 0          // clear count
-	assetOwnersCache.DeleteAll() // clear cache
-
-	for i := 0; i < 2; i++ {
-		assets, _, _, err := assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
-			Pageable{Page: 0, Size: 10})
-		assert.NoError(t, err)
-		assert.Len(t, assets, 7)
-
-		// sorted descending
-		assert.Equal(t, int64(31780730794), assets[0].NumberOfShares)
-		assert.Equal(t, 4, int(assets[1].NumberOfShares))
-
-		assert.Equal(t, 1, clientPoolCount) // client used only once
-		assert.True(t, assetOwnersCache.Has("owners:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB:TEST"))
-	}
-
-	tearDown(t)
-
-}
-
-func Test_AssetService_GetOwnedAssets_ReturnPaginated(t *testing.T) {
-
-	setup(t)
-
-	assets, tick, total, err := assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
-		Pageable{Page: 0, Size: 5})
-	assert.NoError(t, err)
-	assert.Len(t, assets, 5)
-	assert.Equal(t, int(tick), 22014071)
-	assert.Equal(t, 7, total)
-
-	assert.Equal(t, int64(31780730794), assets[0].NumberOfShares)
-	assert.Equal(t, 4, int(assets[1].NumberOfShares))
-	assert.Equal(t, 1, int(assets[2].NumberOfShares))
-	assert.Equal(t, 1, int(assets[3].NumberOfShares))
-	assert.Equal(t, 1, int(assets[4].NumberOfShares))
-
-	assets, tick, total, err = assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
-		Pageable{Page: 1, Size: 5})
-	assert.NoError(t, err)
-	assert.Len(t, assets, 2)
-	assert.Equal(t, 20192347, int(tick))
-	assert.Equal(t, 7, total)
-
-	assert.Equal(t, 1, int(assets[0].NumberOfShares))
-	assert.Equal(t, 1, int(assets[1].NumberOfShares))
-
-	assets, tick, total, err = assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
-		Pageable{Page: 6, Size: 1})
-	assert.NoError(t, err)
-	assert.Len(t, assets, 1)
-	assert.Equal(t, 20192347, int(tick))
-	assert.Equal(t, 7, total)
-	assert.Equal(t, 1, int(assets[0].NumberOfShares))
-
-	assets, tick, total, err = assetService.GetOwnedAssets(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", "TEST",
-		Pageable{Page: 6, Size: 10})
-	assert.NoError(t, err)
-	assert.Len(t, assets, 0)
-	assert.Equal(t, 0, int(tick))
-	assert.Equal(t, 7, total)
-
-	tearDown(t)
-
-}
-
-func Test_AssetService_CombineOwnedAssets(t *testing.T) {
-
-	ownerships := types.AssetOwnerships{
-		{
-			Asset: types.AssetOwnershipData{
-				PublicKey:             [32]byte{7, 8, 9},
-				Type:                  3,
-				Padding:               [1]int8{},
-				ManagingContractIndex: 0,
-				IssuanceIndex:         0,
-				NumberOfUnits:         1000,
-			},
-			Tick:          1,
-			UniverseIndex: 1,
-		},
-		{
-			Asset: types.AssetOwnershipData{
-				PublicKey:             [32]byte{1, 2, 3},
-				Type:                  3,
-				Padding:               [1]int8{},
-				ManagingContractIndex: 1,
-				IssuanceIndex:         1,
-				NumberOfUnits:         1000,
-			},
-			Tick:          1,
-			UniverseIndex: 1,
-		}, {
-			Asset: types.AssetOwnershipData{
-				PublicKey:             [32]byte{6, 6, 6},
-				Type:                  3,
-				Padding:               [1]int8{},
-				ManagingContractIndex: 2,
-				IssuanceIndex:         2,
-				NumberOfUnits:         100,
-			},
-			Tick:          1,
-			UniverseIndex: 2,
-		}, {
-			Asset: types.AssetOwnershipData{
-				PublicKey:             [32]byte{1, 2, 3},
-				Type:                  3,
-				Padding:               [1]int8{},
-				ManagingContractIndex: 3,
-				IssuanceIndex:         3,
-				NumberOfUnits:         10,
-			},
-			Tick:          1,
-			UniverseIndex: 3,
-		},
-	}
-
-	combined, err := combineEntriesForSameIdentity(ownerships)
-	assert.NoError(t, err)
-
-	expected := types.AssetOwnerships{
-		{
-			Asset: types.AssetOwnershipData{
-				PublicKey:             [32]byte{1, 2, 3},
-				Type:                  3,
-				Padding:               [1]int8{},
-				ManagingContractIndex: 1,
-				IssuanceIndex:         1,
-				NumberOfUnits:         1010,
-			},
-			Tick:          1,
-			UniverseIndex: 1,
-		}, {
-			Asset: types.AssetOwnershipData{
-				PublicKey:             [32]byte{7, 8, 9},
-				Type:                  3,
-				Padding:               [1]int8{},
-				ManagingContractIndex: 0,
-				IssuanceIndex:         0,
-				NumberOfUnits:         1000,
-			},
-			Tick:          1,
-			UniverseIndex: 1,
-		}, {
-			Asset: types.AssetOwnershipData{
-				PublicKey:             [32]byte{6, 6, 6},
-				Type:                  3,
-				Padding:               [1]int8{},
-				ManagingContractIndex: 2,
-				IssuanceIndex:         2,
-				NumberOfUnits:         100,
-			},
-			Tick:          1,
-			UniverseIndex: 2,
-		},
-	}
-
-	assert.Equal(t, expected, *combined)
-
-}
-
-func setup(t *testing.T) {
-	assetOwnersCache = ttlcache.New[string, *types.AssetOwnerships](
-		ttlcache.WithTTL[string, *types.AssetOwnerships](10*time.Second),
-		ttlcache.WithDisableTouchOnHit[string, *types.AssetOwnerships](),
-		ttlcache.WithCapacity[string, *types.AssetOwnerships](uint64(1024*1024)),
+func newCache() *ttlcache.Cache[string, *types.AssetOwnerships] {
+	return ttlcache.New[string, *types.AssetOwnerships](
+		ttlcache.WithTTL[string, *types.AssetOwnerships](time.Minute),
 	)
-	go assetOwnersCache.Start()
-	startTcpServer(t) // this is a bit hacky. only serves one response.
-	assetService = NewAssetService(FakePool{}, assetOwnersCache)
 }
 
-func tearDown(t *testing.T) {
-	stopTcpServer(t)
+func pubKey(b byte) [32]byte {
+	var key [32]byte
+	key[0] = b
+	return key
 }
 
-func startTcpServer(t *testing.T) {
-	log.Print("Starting tcp server")
-	var err error
-	tcpServer, err = net.Listen("tcp", "localhost:12345")
-	if err != nil {
-		log.Fatal(err)
+func makeOwnership(pk [32]byte, units int64, tick uint32) types.AssetOwnership {
+	return types.AssetOwnership{
+		Asset: types.AssetOwnershipData{PublicKey: pk, NumberOfUnits: units},
+		Tick:  tick,
 	}
-
-	go tcpAccept(t)
 }
 
-func tcpAccept(t *testing.T) {
-	conn, err := tcpServer.Accept()
-	assert.NoError(t, err)
-	handleRequest(conn, t)
+func TestGetOwnedAssets_ReturnsSortedBySharesOwnerships(t *testing.T) {
+	ownerships := types.AssetOwnerships{
+		makeOwnership(pubKey(1), 100, 10),
+		makeOwnership(pubKey(2), 500, 20),
+		makeOwnership(pubKey(3), 200, 15),
+	}
+	svc := NewAssetService(&stubFetcher{ownerships: &ownerships}, newCache())
+
+	got, tick, total, err := svc.GetOwnedAssets(context.Background(), "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+	require.NoError(t, err)
+	assert.Equal(t, 3, total)
+	assert.Equal(t, uint32(20), tick)
+	require.Len(t, got, 3)
+	assert.Equal(t, int64(500), got[0].NumberOfShares)
+	assert.Equal(t, int64(200), got[1].NumberOfShares)
+	assert.Equal(t, int64(100), got[2].NumberOfShares)
 }
 
-func handleRequest(conn net.Conn, t *testing.T) {
-	log.Print("Received request")
-	hexStr := "4000003511dcb7b9" + // RESPOND_ASSETS
-		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" + // 1 share / tick number 20192347 (test data)
-		"4000003511dcb7b9" + // RESPOND_ASSETS
-		"7b5efffa039860590ecc801ab2f9a95da0b97592398d3414db1d3e44cac79d9a020001000400000004000000000000005b1c34017b5eff00" + // 4 shares
-		"4000003511dcb7b9" + // RESPOND_ASSETS
-		"2fc8a29a7a4a6969cd3a57244c48c5027b5b6940ed11f739d052b40e9dd357fa020001000830bb00aa7747660700000077e84f012fc8a200" + // 31780730794 shares / tick number 22014071
-		"4000003511dcb7b9" + // RESPOND_ASSETS
-		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" +
-		"4000003511dcb7b9" + // RESPOND_ASSETS
-		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" +
-		"4000003511dcb7b9" + // RESPOND_ASSETS
-		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" +
-		"4000003511dcb7b9" + // RESPOND_ASSETS
-		"feb0fb0e023c5f98ae9549112117ef3bf80608fcd252abc5772a07efd3f88b10020001000400000001000000000000005b1c3401feb0fb00" +
-		"0800002328af10a4" // END_RESPONSE
-	ownedAssetsBin, err := hex.DecodeString(hexStr)
-	assert.NoError(t, err)
-	_, err = conn.Write(ownedAssetsBin)
-	assert.NoError(t, err)
-	err = conn.Close()
-	assert.NoError(t, err)
+func TestGetOwnedAssets_ReturnsSortedByIdentity(t *testing.T) {
+	ownerships := types.AssetOwnerships{
+		makeOwnership(pubKey(0), 99, 15),
+		makeOwnership(pubKey(1), 99, 15),
+		makeOwnership(pubKey(2), 100, 15),
+		makeOwnership(pubKey(3), 100, 15),
+		makeOwnership(pubKey(4), 100, 15),
+		makeOwnership(pubKey(5), 100, 15),
+		makeOwnership(pubKey(6), 123, 15),
+	}
+	svc := NewAssetService(&stubFetcher{ownerships: &ownerships}, newCache())
+
+	got, _, total, err := svc.GetOwnedAssets(context.Background(), "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+	require.NoError(t, err)
+	assert.Equal(t, 7, total)
+	require.Len(t, got, 7)
+	// sorted by shares (desc) and then by identity (asc)
+	assert.Equal(t, int64(123), got[0].NumberOfShares)
+	assert.Equal(t, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQGNM", got[0].GetIdentity())
+	assert.Equal(t, int64(100), got[1].NumberOfShares)
+	assert.Equal(t, "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACNKL", got[1].GetIdentity())
+	assert.Equal(t, int64(100), got[2].NumberOfShares)
+	assert.Equal(t, "DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANMIG", got[2].GetIdentity())
+	assert.Equal(t, int64(100), got[3].NumberOfShares)
+	assert.Equal(t, "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVWRF", got[3].GetIdentity())
+	assert.Equal(t, int64(100), got[4].NumberOfShares)
+	assert.Equal(t, "FAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYWJB", got[4].GetIdentity())
+	assert.Equal(t, int64(99), got[5].NumberOfShares)
+	assert.Equal(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", got[5].GetIdentity())
+	assert.Equal(t, int64(99), got[6].NumberOfShares)
+	assert.Equal(t, "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARMID", got[6].GetIdentity())
 }
 
-func stopTcpServer(t *testing.T) {
-	log.Print("Stopping tcp server")
-	err := tcpServer.Close()
-	assert.NoError(t, err)
+func TestGetOwnedAssets_ReturnsCombinedSortedByIdentity(t *testing.T) {
+	// entries for same pub key get combined
+	ownerships := types.AssetOwnerships{
+		makeOwnership(pubKey(0), 60, 11),
+		makeOwnership(pubKey(0), 40, 11),
+		makeOwnership(pubKey(1), 50, 11),
+		makeOwnership(pubKey(1), 50, 11),
+		makeOwnership(pubKey(2), 99, 11),
+		makeOwnership(pubKey(2), 1, 11),
+		makeOwnership(pubKey(3), 100, 11),
+		makeOwnership(pubKey(4), 70, 11),
+		makeOwnership(pubKey(4), 30, 11),
+	}
+	svc := NewAssetService(&stubFetcher{ownerships: &ownerships}, newCache())
+
+	got, _, total, err := svc.GetOwnedAssets(context.Background(), "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+	require.NoError(t, err)
+	assert.Equal(t, 5, total)
+	require.Len(t, got, 5)
+	assert.Equal(t, int64(100), got[0].NumberOfShares)
+	assert.Equal(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB", got[0].GetIdentity())
+	assert.Equal(t, int64(100), got[1].NumberOfShares)
+	assert.Equal(t, "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARMID", got[1].GetIdentity())
+	assert.Equal(t, int64(100), got[1].NumberOfShares)
+	assert.Equal(t, "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACNKL", got[2].GetIdentity())
+	assert.Equal(t, int64(100), got[2].NumberOfShares)
+	assert.Equal(t, "DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANMIG", got[3].GetIdentity())
+	assert.Equal(t, int64(100), got[3].NumberOfShares)
+	assert.Equal(t, "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVWRF", got[4].GetIdentity())
+	assert.Equal(t, int64(100), got[4].NumberOfShares)
+}
+
+func TestGetOwnedAssets_IdentityStrings(t *testing.T) {
+	ownerships := types.AssetOwnerships{
+		makeOwnership(pubKey(1), 100, 5),
+		makeOwnership(pubKey(2), 200, 5),
+	}
+	svc := NewAssetService(&stubFetcher{ownerships: &ownerships}, newCache())
+
+	got, _, _, err := svc.GetOwnedAssets(context.Background(), "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+	require.NoError(t, err)
+
+	// sorted descending, so pubKey(2)=200 comes first
+	assert.Equal(t, "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACNKL", got[0].Identity)
+	assert.Equal(t, "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARMID", got[1].Identity)
+}
+
+func TestGetOwnedAssets_Pagination(t *testing.T) {
+	ownerships := types.AssetOwnerships{
+		makeOwnership(pubKey(1), 500, 1),
+		makeOwnership(pubKey(2), 400, 2),
+		makeOwnership(pubKey(3), 300, 3),
+		makeOwnership(pubKey(4), 200, 4),
+		makeOwnership(pubKey(5), 100, 5),
+	}
+	svc := NewAssetService(&stubFetcher{ownerships: &ownerships}, newCache())
+	ctx := context.Background()
+
+	page0, _, total, err := svc.GetOwnedAssets(ctx, "ISSUER", "ASSET", Pageable{Page: 0, Size: 2})
+	require.NoError(t, err)
+	assert.Equal(t, 5, total)
+	require.Len(t, page0, 2)
+	assert.Equal(t, int64(500), page0[0].NumberOfShares)
+	assert.Equal(t, int64(400), page0[1].NumberOfShares)
+
+	page1, _, _, err := svc.GetOwnedAssets(ctx, "ISSUER", "ASSET", Pageable{Page: 1, Size: 2})
+	require.NoError(t, err)
+	require.Len(t, page1, 2)
+	assert.Equal(t, int64(300), page1[0].NumberOfShares)
+	assert.Equal(t, int64(200), page1[1].NumberOfShares)
+}
+
+func TestGetOwnedAssets_OutOfBoundsPageReturnsEmpty(t *testing.T) {
+	ownerships := types.AssetOwnerships{makeOwnership(pubKey(1), 100, 1)}
+	svc := NewAssetService(&stubFetcher{ownerships: &ownerships}, newCache())
+
+	got, _, total, err := svc.GetOwnedAssets(context.Background(), "ISSUER", "ASSET", Pageable{Page: 5, Size: 10})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	assert.Empty(t, got)
+}
+
+func TestGetOwnedAssets_FetcherErrorReturnsGRPCInternal(t *testing.T) {
+	svc := NewAssetService(&stubFetcher{err: errors.New("node unreachable")}, newCache())
+
+	_, _, _, err := svc.GetOwnedAssets(context.Background(), "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok, "expected gRPC status error, got: %v", err)
+	assert.Equal(t, codes.Internal, st.Code())
+}
+
+func TestGetOwnedAssets_EmptyResultNotCached(t *testing.T) {
+	empty := types.AssetOwnerships{}
+	stub := &stubFetcher{ownerships: &empty}
+	svc := NewAssetService(stub, newCache())
+	ctx := context.Background()
+
+	_, _, _, _ = svc.GetOwnedAssets(ctx, "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+	_, _, _, _ = svc.GetOwnedAssets(ctx, "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+
+	assert.Equal(t, 2, stub.callCount, "empty results must not be cached")
+}
+
+func TestGetOwnedAssets_NonEmptyResultIsCached(t *testing.T) {
+	ownerships := types.AssetOwnerships{makeOwnership(pubKey(1), 100, 1)}
+	stub := &stubFetcher{ownerships: &ownerships}
+	svc := NewAssetService(stub, newCache())
+	ctx := context.Background()
+
+	_, _, _, _ = svc.GetOwnedAssets(ctx, "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+	_, _, _, _ = svc.GetOwnedAssets(ctx, "ISSUER", "ASSET", Pageable{Page: 0, Size: 10})
+
+	assert.Equal(t, 1, stub.callCount, "non-empty result should be cached")
+}
+
+func TestCombineEntriesForSameIdentity_SumsDuplicates(t *testing.T) {
+	pk := pubKey(1)
+	result, err := combineEntriesForSameIdentity([]types.AssetOwnership{
+		makeOwnership(pk, 100, 1),
+		makeOwnership(pk, 200, 2),
+	})
+	require.NoError(t, err)
+	require.Len(t, *result, 1)
+	assert.Equal(t, int64(300), (*result)[0].Asset.NumberOfUnits)
+}
+
+func TestCombineEntriesForSameIdentity_KeepsDistinctIdentities(t *testing.T) {
+	result, err := combineEntriesForSameIdentity([]types.AssetOwnership{
+		makeOwnership(pubKey(1), 100, 1),
+		makeOwnership(pubKey(2), 200, 2),
+	})
+	require.NoError(t, err)
+	assert.Len(t, *result, 2)
+}
+
+func TestCacheKey(t *testing.T) {
+	assert.Equal(t, "owners:ISSUER:ASSET", cacheKey("ISSUER", "ASSET"))
 }
