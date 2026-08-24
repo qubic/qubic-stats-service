@@ -5,7 +5,7 @@ UNAME_M := $(shell uname -m)
 
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(UNAME_M),arm64)
-        OPT_ARGS := --proto_path=/opt/homebrew/Cellar/protobuf/25.3_1/include
+        OPT_ARGS := --proto_path=$(shell brew --prefix protobuf)/include
     else
         OPT_ARGS :=
     endif
@@ -31,7 +31,7 @@ all: $(GO) openapi
 	--go_out=paths=source_relative:. *.proto
 
 openapi: stats-api.proto
-		protoc --openapiv2_out=logtostderr=true:. $(OPT_ARGS) \
+		protoc -I=. --openapiv2_out=logtostderr=true:. $(OPT_ARGS) \
 			   stats-api.proto
 
 clean:

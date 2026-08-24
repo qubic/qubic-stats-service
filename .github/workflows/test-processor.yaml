@@ -1,0 +1,24 @@
+on:
+  push:
+    paths:
+      - 'processor/**'
+  pull_request:
+    paths:
+      - 'processor/**'
+
+name: Test stats processor
+jobs:
+  test-nocache:
+    strategy:
+      matrix:
+        go-version: [1.26.x]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: false
+      - run: go test -p 1 -tags ci ./...
+        working-directory: processor

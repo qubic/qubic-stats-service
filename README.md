@@ -12,6 +12,9 @@ Currently, the service stores the following data:
 - Tick count of current Epoch
 - Empty tick count of current Epoch
 - Epoch tick quality (ratio between total ticks and non-empty ticks)
+- Tick count of the last 10.000 ticks
+- Empty tick count of the last 10.000 ticks
+- Tick quality of the last 10.000 ticks
 - Number of burned QUs
 - Rich list
 
@@ -43,7 +46,7 @@ The `spectrum_parser` mode is used to calculate and save spectrum related data i
 --service-archiver-grpc-address/$QUBIC_STATS_PROCESSOR_SERVICE_ARCHIVER_GRPC_ADDRESS  <string>    (default: localhost:8001)
 --service-coin-gecko-token/$QUBIC_STATS_PROCESSOR_SERVICE_COIN_GECKO_TOKEN            <string>    
 --service-data-scrape-interval/$QUBIC_STATS_PROCESSOR_SERVICE_DATA_SCRAPE_INTERVAL    <duration>  (default: 1m)
---service-data-scrape-timeout/$QUBIC_STATS_PROCESSOR_SERVICE_DATA_SCRAPE_TIMEOUT      <duration>  (default: 5s)
+--service-data-scrape-timeout/$QUBIC_STATS_PROCESSOR_SERVICE_DATA_SCRAPE_TIMEOUT      <duration>  (default: 15s)
 
 --mongo-username/$QUBIC_STATS_PROCESSOR_MONGO_USERNAME                                <string>    (default: user)
 --mongo-password/$QUBIC_STATS_PROCESSOR_MONGO_PASSWORD                                <string>    (default: pass)

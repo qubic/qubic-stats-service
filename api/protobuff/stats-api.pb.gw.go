@@ -87,7 +87,7 @@ func local_request_StatsService_GetRichListSlice_0(ctx context.Context, marshale
 }
 
 var (
-	filter_StatsService_GetAssetOwners_0 = &utilities.DoubleArray{Encoding: map[string]int{"issuer_identity": 0, "asset_name": 1}, Base: []int{1, 1, 2, 0, 0}, Check: []int{0, 1, 1, 2, 3}}
+	filter_StatsService_GetAssetOwners_0 = &utilities.DoubleArray{Encoding: map[string]int{"issuer_identity": 0, "issuerIdentity": 1, "asset_name": 2, "assetName": 3}, Base: []int{1, 1, 2, 3, 4, 0, 0, 0, 0}, Check: []int{0, 1, 1, 1, 1, 2, 3, 4, 5}}
 )
 
 func request_StatsService_GetAssetOwners_0(ctx context.Context, marshaler runtime.Marshaler, client StatsServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {

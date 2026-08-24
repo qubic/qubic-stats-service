@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
 	"github.com/stretchr/testify/assert"
 	"log"
@@ -16,6 +17,54 @@ type FakeAssetService struct {
 
 func (fas FakeAssetService) GetOwnedAssets(context.Context, string, string, Pageable) ([]*protobuff.AssetOwnership, uint32, int, error) {
 	return fas.AssetOwnerships, fas.Tick, len(fas.AssetOwnerships), fas.Err
+}
+
+func Test_RpcServer_GetLatestData(t *testing.T) {
+
+	dataCache := &cache.Cache{}
+	dataCache.UpdateDataCache(
+		cache.SpectrumData{
+			Timestamp:         1234,
+			CirculatingSupply: 100000000,
+			ActiveAddresses:   555,
+		},
+		cache.QubicData{
+			Timestamp:                5678,
+			Price:                    0.000002,
+			MarketCap:                200,
+			Epoch:                    42,
+			CurrentTick:              123456,
+			TicksInCurrentEpoch:      20000,
+			EmptyTicksInCurrentEpoch: 119,
+			EpochTickQuality:         99.405,
+			BurnedQUs:                12345,
+			TicksInLast10000:         10000,
+			EmptyTicksInLast10000:    41,
+			Last10000TickQuality:     99.59,
+		},
+	)
+
+	server := Server{cache: dataCache}
+
+	response, err := server.GetLatestData(context.Background(), nil)
+	assert.NoError(t, err)
+
+	assert.Equal(t, &protobuff.QubicData{
+		Timestamp:                5678,
+		Price:                    0.000002,
+		CirculatingSupply:        100000000,
+		ActiveAddresses:          555,
+		MarketCap:                200,
+		Epoch:                    42,
+		CurrentTick:              123456,
+		TicksInCurrentEpoch:      20000,
+		EmptyTicksInCurrentEpoch: 119,
+		EpochTickQuality:         99.405,
+		BurnedQus:                12345,
+		TicksInLast10000:         10000,
+		EmptyTicksInLast10000:    41,
+		Last10000TickQuality:     99.59,
+	}, response.GetData())
 }
 
 func Test_RpcServer_GetAssetOwners(t *testing.T) {

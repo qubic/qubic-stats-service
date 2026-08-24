@@ -18,6 +18,9 @@ message QubicData {
   uint32 empty_ticks_in_current_epoch = 9;
   float epoch_tick_quality = 10;
   uint64 burned_qus = 11;
+  uint32 ticks_in_last10000 = 12;
+  uint32 empty_ticks_in_last10000 = 13;
+  float last10000_tick_quality = 14;
 }
 
 // Pagination

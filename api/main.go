@@ -15,8 +15,8 @@ import (
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/live"
 	"github.com/qubic/qubic-stats-api/rpc"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const prefix = "QUBIC_STATS_API"
@@ -193,7 +193,7 @@ func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error)
 
 	serverApi := options.ServerAPI(options.ServerAPIVersion1)
 	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi).SetTimeout(configuration.Timeout)
-	client, err := mongo.Connect(context.Background(), opts)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating database client")
 	}
