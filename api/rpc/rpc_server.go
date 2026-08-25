@@ -13,9 +13,9 @@ import (
 	"github.com/qubic/go-node-connector/types"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -60,6 +60,9 @@ func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.
 			EmptyTicksInCurrentEpoch: qubicData.EmptyTicksInCurrentEpoch,
 			EpochTickQuality:         qubicData.EpochTickQuality,
 			BurnedQus:                qubicData.BurnedQUs,
+			TicksInLast10000:         qubicData.TicksInLast10000,
+			EmptyTicksInLast10000:    qubicData.EmptyTicksInLast10000,
+			Last10000TickQuality:     qubicData.Last10000TickQuality,
 		},
 	}, nil
 
@@ -100,9 +103,9 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 	}
 
 	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + epochString)
-	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(limit)).SetSort(bson.D{{"balance", -1}}) // Query database for index start to start + pageSize and sort desc
+	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(limit)).SetSort(bson.D{{Key: "balance", Value: -1}}) // Query database for index start to start + pageSize and sort desc
 
-	cursor, err := collection.Find(ctx, bson.D{{}}, findOptions)
+	cursor, err := collection.Find(ctx, bson.D{}, findOptions)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "cannot get rich list section from the database. error: %v", err)
 	}

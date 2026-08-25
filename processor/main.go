@@ -12,9 +12,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/qubic/qubic-stats-processor/service"
 	"github.com/qubic/qubic-stats-processor/spectrum"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const prefix = "QUBIC_STATS_PROCESSOR"
@@ -34,7 +34,7 @@ type Configuration struct {
 
 		CoinGeckoToken     string        `cong:"default:XXXXXXXXXXXXXXXXXXXXX"`
 		DataScrapeInterval time.Duration `conf:"default:1m"`
-		DataScrapeTimeout  time.Duration `conf:"default:5s"`
+		DataScrapeTimeout  time.Duration `conf:"default:15s"`
 	}
 	Mongo struct {
 		Username string `conf:"default:user"`
@@ -276,7 +276,7 @@ func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error)
 
 	serverApi := options.ServerAPI(options.ServerAPIVersion1)
 	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
-	client, err := mongo.Connect(context.Background(), opts)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating database client")
 	}

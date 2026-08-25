@@ -13,8 +13,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/qubic/go-node-connector/types"
 	"github.com/schollz/progressbar/v3"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 var EmptyAddress [32]byte
