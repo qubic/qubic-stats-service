@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"regexp"
@@ -103,17 +104,19 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 	}
 
 	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + epochString)
-	findOptions := options.Find().SetSkip(int64(start)).SetLimit(int64(limit)).SetSort(bson.D{{Key: "balance", Value: -1}}) // Query database for index start to start + pageSize and sort desc
 
-	cursor, err := collection.Find(ctx, bson.D{}, findOptions)
+	results, err := queryRichListByRank(ctx, collection, start, limit)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "cannot get rich list section from the database. error: %v", err)
 	}
 
-	var results cache.RichList
-	err = cursor.All(ctx, &results)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to unmarshal database response. error: %v", err)
+	// A rich list written before the processor stored the rank holds no rank to range over. Sorting
+	// keeps such an epoch served until the next spectrum parse has rewritten the collection.
+	if len(results) == 0 && start < totalRecords {
+		results, err = queryRichListByBalance(ctx, collection, start, limit)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "cannot get rich list section from the database. error: %v", err)
+		}
 	}
 
 	var list []*protobuff.RichListEntity
@@ -133,6 +136,108 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 		},
 	}, nil
 
+}
+
+// queryRichListByRank reads a page of the rich list with an indexed range scan over the rank the
+// processor stored, which costs nothing to page deeply into.
+func queryRichListByRank(ctx context.Context, collection *mongo.Collection, start, limit int) (cache.RichList, error) {
+
+	filter := bson.D{{Key: "rank", Value: bson.D{
+		{Key: "$gte", Value: start},
+		{Key: "$lt", Value: start + limit},
+	}}}
+	findOptions := options.Find().SetSort(bson.D{{Key: "rank", Value: 1}})
+
+	cursor, err := collection.Find(ctx, filter, findOptions)
+	if err != nil {
+		return nil, errors.Wrap(err, "querying rich list by rank")
+	}
+
+	var results cache.RichList
+	if err := cursor.All(ctx, &results); err != nil {
+		return nil, errors.Wrap(err, "decoding rich list")
+	}
+
+	return results, nil
+}
+
+// queryRichListByBalance is the pre rank way of reading a page and sorts the whole collection. It
+// only serves rich lists that were written before the rank existed.
+func queryRichListByBalance(ctx context.Context, collection *mongo.Collection, start, limit int) (cache.RichList, error) {
+
+	findOptions := options.Find().
+		SetSkip(int64(start)).
+		SetLimit(int64(limit)).
+		SetSort(bson.D{{Key: "balance", Value: -1}}).
+		SetAllowDiskUse(true) // the collection is neither indexed nor small enough to sort in memory
+
+	cursor, err := collection.Find(ctx, bson.D{}, findOptions)
+	if err != nil {
+		return nil, errors.Wrap(err, "querying rich list by balance")
+	}
+
+	var results cache.RichList
+	if err := cursor.All(ctx, &results); err != nil {
+		return nil, errors.Wrap(err, "decoding rich list")
+	}
+
+	return results, nil
+}
+
+// supplyCap is the maximum amount of QUs that can ever exist.
+const supplyCap int64 = 1_000_000_000_000_000
+
+// maxSupplyHistoryPoints bounds how many points one supply history response may hold.
+const maxSupplyHistoryPoints = 1000
+
+func (s *Server) GetSupplyHistory(_ context.Context, request *protobuff.GetSupplyHistoryRequest) (*protobuff.GetSupplyHistoryResponse, error) {
+
+	fromEpoch := request.GetFromEpoch()
+	toEpoch := request.GetToEpoch()
+	if toEpoch == 0 {
+		toEpoch = math.MaxUint32
+	}
+	if fromEpoch > toEpoch {
+		return nil, status.Errorf(codes.InvalidArgument, "fromEpoch (%d) is after toEpoch (%d)", request.GetFromEpoch(), request.GetToEpoch())
+	}
+
+	limit := int(request.GetLimit())
+	if limit < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid limit (%d)", limit)
+	}
+	if limit == 0 || limit > maxSupplyHistoryPoints {
+		limit = maxSupplyHistoryPoints
+	}
+
+	// The history is held in the cache, so this serves without touching the database.
+	history := s.cache.GetSupplyHistory()
+
+	points := make([]*protobuff.SupplyHistoryPoint, 0, min(len(history), limit))
+	for _, record := range history {
+		if record.Epoch < fromEpoch || record.Epoch > toEpoch {
+			continue
+		}
+		points = append(points, &protobuff.SupplyHistoryPoint{
+			Epoch:             record.Epoch,
+			CirculatingSupply: record.CirculatingSupply,
+			TotalEmitted:      record.TotalEmitted,
+			Timestamp:         record.EpochEndTimestamp,
+			SupplySource:      record.SupplySource,
+		})
+	}
+
+	// The most recent points are the ones kept when the range holds more than the limit.
+	if len(points) > limit {
+		points = points[len(points)-limit:]
+	}
+
+	return &protobuff.GetSupplyHistoryResponse{
+		SupplyCap:    supplyCap,
+		CurrentEpoch: s.cache.GetQubicData().Epoch,
+		// Read from the same place GetLatestData reads it, so that the two endpoints cannot disagree.
+		CurrentCirculatingSupply: s.cache.GetSpectrumData().CirculatingSupply,
+		Points:                   points,
+	}, nil
 }
 
 type Pageable struct {

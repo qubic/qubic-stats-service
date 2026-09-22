@@ -15,11 +15,15 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 var EmptyAddress [32]byte
 
 type Data struct {
+	// Epoch is the epoch the spectrum file was dumped at, which is the epoch the measured supply
+	// belongs to. Documents written before this field was introduced hold a zero epoch.
+	Epoch             uint32
 	CirculatingSupply int64
 	ActiveAddresses   int
 	Timestamp         int64
@@ -70,9 +74,7 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 
 	}
 
-	slices.SortFunc(richList, func(a, b RichListEntity) int {
-		return cmp.Compare(a.Balance, b.Balance)
-	})
+	rankRichList(richList)
 
 	println("Done.")
 	fmt.Printf("Circulating supply: %d\n", circulatingSupply)
@@ -86,6 +88,23 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 		},
 		List: richList,
 	}, nil
+}
+
+// rankRichList orders the rich list by balance, highest first, and records each entry's position.
+// Equal balances are broken by identity so that a rank stays the same across re-parses of the same
+// spectrum file. The api pages through the stored rank instead of sorting the collection.
+func rankRichList(richList RichList) {
+
+	slices.SortFunc(richList, func(a, b RichListEntity) int {
+		if c := -cmp.Compare(a.Balance, b.Balance); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Identity, b.Identity)
+	})
+
+	for index := range richList {
+		richList[index].Rank = int32(index)
+	}
 }
 
 func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
@@ -187,23 +206,13 @@ func LoadSpectrumDataFromDatabase(ctx context.Context, dbClient *mongo.Client, d
 
 	collection := dbClient.Database(database).Collection(spectrumCollection)
 
-	cursor, err := collection.Find(ctx, bson.D{})
+	var result Data
+
+	opts := options.FindOne().SetSort(bson.D{{Key: "timestamp", Value: -1}})
+
+	err := collection.FindOne(ctx, bson.D{}, opts).Decode(&result)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting spectrum data from database")
-	}
-
-	var results []Data
-	var result Data
-	var latestTimestamp int64
-
-	if err = cursor.All(ctx, &results); err != nil {
-		return nil, errors.Wrap(err, "getting spectrum data from cursor")
-	}
-
-	for _, data := range results {
-		if data.Timestamp > latestTimestamp {
-			result = data
-		}
 	}
 
 	println("Done.")
@@ -241,6 +250,15 @@ func SaveRichListToDatabase(ctx context.Context, dbClient *mongo.Client, databas
 	_, err := collection.InsertMany(ctx, list)
 	if err != nil {
 		return errors.Wrap(err, "saving rich list to database")
+	}
+
+	// Built after the insert, which is cheaper than maintaining it while writing half a million
+	// entries. The api pages through the list by rank.
+	_, err = collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "rank", Value: 1}},
+	})
+	if err != nil {
+		return errors.Wrap(err, "creating rich list rank index")
 	}
 
 	println("Done.")

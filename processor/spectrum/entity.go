@@ -76,6 +76,9 @@ func (e *Entity) UnmarshallFromBinary(r io.Reader) error {
 }
 
 type RichListEntity struct {
+	// Rank is the zero based position in the rich list, highest balance first. It is persisted so
+	// that a page can be served with an indexed range query instead of sorting the whole collection.
+	Rank     int32  `bson:"rank"`
 	Identity string `bson:"identity"`
 	Balance  int64  `bson:"balance"`
 }
