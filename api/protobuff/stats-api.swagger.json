@@ -128,6 +128,55 @@
           "StatsService"
         ]
       }
+    },
+    "/v1/supply-history": {
+      "get": {
+        "summary": "Returns the circulating supply per epoch, one point per completed epoch, ordered by epoch\nascending. The epoch in progress is reported separately as current_epoch.",
+        "operationId": "StatsService_GetSupplyHistory",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/pbGetSupplyHistoryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "fromEpoch",
+            "description": "Inclusive. Defaults to the earliest available epoch.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int64"
+          },
+          {
+            "name": "toEpoch",
+            "description": "Inclusive. Defaults to the latest available epoch.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int64"
+          },
+          {
+            "name": "limit",
+            "description": "Maximum number of points. The most recent ones are kept when the range holds more.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "StatsService"
+        ]
+      }
     }
   },
   "definitions": {
@@ -182,6 +231,32 @@
         },
         "richList": {
           "$ref": "#/definitions/pbRichList"
+        }
+      }
+    },
+    "pbGetSupplyHistoryResponse": {
+      "type": "object",
+      "properties": {
+        "supplyCap": {
+          "type": "string",
+          "format": "int64",
+          "description": "Maximum amount of QUs that can ever exist. Constant, for a reference line."
+        },
+        "currentEpoch": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "currentCirculatingSupply": {
+          "type": "string",
+          "format": "int64"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/pbSupplyHistoryPoint"
+          },
+          "description": "Ordered by epoch ascending."
         }
       }
     },
@@ -288,6 +363,34 @@
         "balance": {
           "type": "string",
           "format": "int64"
+        }
+      }
+    },
+    "pbSupplyHistoryPoint": {
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "circulatingSupply": {
+          "type": "string",
+          "format": "int64",
+          "description": "Circulating supply at the end of this epoch, as measured by the spectrum file that was dumped\nat the transition into the next one."
+        },
+        "totalEmitted": {
+          "type": "string",
+          "format": "int64",
+          "description": "Cumulative issuance up to and including this epoch."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "int64",
+          "description": "When this epoch closed, in unix seconds. Display only."
+        },
+        "supplySource": {
+          "type": "string",
+          "description": "How the supply of this point was obtained. \"spectrum\" and \"derived\" are measured values,\n\"carried-over\" means that no spectrum file could be attributed to this epoch and the supply of\nan earlier one is repeated, which shows up as an epoch without any burn."
         }
       }
     },

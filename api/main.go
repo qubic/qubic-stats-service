@@ -45,11 +45,12 @@ func run() error {
 			Port     string `conf:"default:27017"`
 			Options  string
 
-			Database           string        `conf:"default:qubic_frontend"`
-			SpectrumCollection string        `conf:"default:spectrum_data"`
-			DataCollection     string        `conf:"default:general_data"`
-			RichListCollection string        `conf:"default:rich_list"`
-			Timeout            time.Duration `conf:"default:15s"`
+			Database             string        `conf:"default:qubic_frontend"`
+			SpectrumCollection   string        `conf:"default:spectrum_data"`
+			DataCollection       string        `conf:"default:general_data"`
+			RichListCollection   string        `conf:"default:rich_list"`
+			EpochStatsCollection string        `conf:"default:epoch_stats"`
+			Timeout              time.Duration `conf:"default:15s"`
 		}
 		Pool struct {
 			NodeFetcherUrl     string        `conf:"default:http://127.0.0.1:8080/status"`
@@ -114,10 +115,11 @@ func run() error {
 	}()
 
 	serviceConfiguration := cache.ServiceConfiguration{
-		MongoDatabase:            config.Mongo.Database,
-		MongoSpectrumCollection:  config.Mongo.SpectrumCollection,
-		MongoQubicDataCollection: config.Mongo.DataCollection,
-		MongoRichListCollection:  config.Mongo.RichListCollection,
+		MongoDatabase:             config.Mongo.Database,
+		MongoSpectrumCollection:   config.Mongo.SpectrumCollection,
+		MongoQubicDataCollection:  config.Mongo.DataCollection,
+		MongoRichListCollection:   config.Mongo.RichListCollection,
+		MongoEpochStatsCollection: config.Mongo.EpochStatsCollection,
 
 		CacheValidityDuration:    config.Service.CacheValidityDuration,
 		SpectrumValidityDuration: config.Service.SpectrumDataUpdateInterval,

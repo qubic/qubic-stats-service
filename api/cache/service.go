@@ -12,10 +12,11 @@ import (
 )
 
 type ServiceConfiguration struct {
-	MongoDatabase            string
-	MongoSpectrumCollection  string
-	MongoQubicDataCollection string
-	MongoRichListCollection  string
+	MongoDatabase             string
+	MongoSpectrumCollection   string
+	MongoQubicDataCollection  string
+	MongoRichListCollection   string
+	MongoEpochStatsCollection string
 
 	CacheValidityDuration    time.Duration
 	SpectrumValidityDuration time.Duration
@@ -28,11 +29,12 @@ type ServiceConfiguration struct {
 type Service struct {
 	Cache *Cache
 
-	mongoClient              *mongo.Client
-	mongoDatabase            string
-	mongoSpectrumCollection  string
-	mongoQubicDataCollection string
-	mongoRichListCollection  string
+	mongoClient               *mongo.Client
+	mongoDatabase             string
+	mongoSpectrumCollection   string
+	mongoQubicDataCollection  string
+	mongoRichListCollection   string
+	mongoEpochStatsCollection string
 
 	cacheValidityDuration    time.Duration
 	spectrumValidityDuration time.Duration
@@ -46,11 +48,12 @@ func NewCacheService(configuration *ServiceConfiguration, mongoClient *mongo.Cli
 	return &Service{
 		Cache: &Cache{},
 
-		mongoClient:              mongoClient,
-		mongoDatabase:            configuration.MongoDatabase,
-		mongoSpectrumCollection:  configuration.MongoSpectrumCollection,
-		mongoQubicDataCollection: configuration.MongoQubicDataCollection,
-		mongoRichListCollection:  configuration.MongoRichListCollection,
+		mongoClient:               mongoClient,
+		mongoDatabase:             configuration.MongoDatabase,
+		mongoSpectrumCollection:   configuration.MongoSpectrumCollection,
+		mongoQubicDataCollection:  configuration.MongoQubicDataCollection,
+		mongoRichListCollection:   configuration.MongoRichListCollection,
+		mongoEpochStatsCollection: configuration.MongoEpochStatsCollection,
 
 		cacheValidityDuration:    configuration.CacheValidityDuration,
 		spectrumValidityDuration: configuration.SpectrumValidityDuration,
@@ -74,10 +77,8 @@ func (s *Service) Start() chan bool {
 			lastSpectrumDataUpdate := s.Cache.GetLastSpectrumDataUpdate()
 			nextSpectrumUpdate := lastSpectrumDataUpdate.Add(s.spectrumValidityDuration)
 
-			updateSpectrum := false
-			if nextSpectrumUpdate.Compare(time.Now()) > 0 || s.Cache.spectrumData.CirculatingSupply == 0 {
-				updateSpectrum = true
-			}
+			// Either the refresh interval has passed, or nothing has been cached yet.
+			updateSpectrum := !nextSpectrumUpdate.After(time.Now()) || s.Cache.GetSpectrumData().CirculatingSupply == 0
 
 			err := s.updateCache(updateSpectrum, true)
 			if err != nil {
@@ -118,7 +119,36 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 
 	s.Cache.UpdateDataCache(spectrumData, qubicData)
 
+	// The supply history is small and immutable per epoch, so it is simply reloaded in full. Failing
+	// to load it must not hold back the rest of the cache.
+	supplyHistory, err := s.fetchSupplyHistory(ctx)
+	if err != nil {
+		fmt.Printf("Failed to update supply history. Error: %v\n", err)
+	} else {
+		s.Cache.UpdateSupplyHistory(supplyHistory)
+	}
+
 	return nil
+}
+
+// fetchSupplyHistory loads every epoch stats record, oldest epoch first. An empty collection is not
+// an error: the records only appear once the processor has written or backfilled them.
+func (s *Service) fetchSupplyHistory(ctx context.Context) (SupplyHistory, error) {
+	collection := s.mongoClient.Database(s.mongoDatabase).Collection(s.mongoEpochStatsCollection)
+
+	opts := options.Find().SetSort(bson.D{{Key: "_id", Value: 1}})
+
+	cursor, err := collection.Find(ctx, bson.D{}, opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "querying epoch stats")
+	}
+
+	var supplyHistory SupplyHistory
+	if err := cursor.All(ctx, &supplyHistory); err != nil {
+		return nil, errors.Wrap(err, "decoding epoch stats")
+	}
+
+	return supplyHistory, nil
 }
 
 func (s *Service) fetchSpectrumData(ctx context.Context) (SpectrumData, error) {

@@ -13,6 +13,9 @@ type Cache struct {
 
 	spectrumData           SpectrumData
 	lastSpectrumDataUpdate time.Time
+
+	supplyHistory           SupplyHistory
+	lastSupplyHistoryUpdate time.Time
 }
 
 func (c *Cache) UpdateDataCache(spectrumData SpectrumData, qubicData QubicData) {
@@ -52,4 +55,28 @@ func (c *Cache) GetLastSpectrumDataUpdate() time.Time {
 	defer c.mutexLock.RUnlock()
 
 	return c.lastSpectrumDataUpdate
+}
+
+// UpdateSupplyHistory replaces the cached supply history. The slice is never modified in place, so
+// readers may hold on to the one they were handed.
+func (c *Cache) UpdateSupplyHistory(supplyHistory SupplyHistory) {
+	c.mutexLock.Lock()
+	defer c.mutexLock.Unlock()
+
+	c.supplyHistory = supplyHistory
+	c.lastSupplyHistoryUpdate = time.Now()
+}
+
+func (c *Cache) GetSupplyHistory() SupplyHistory {
+	c.mutexLock.RLock()
+	defer c.mutexLock.RUnlock()
+
+	return c.supplyHistory
+}
+
+func (c *Cache) GetLastSupplyHistoryUpdate() time.Time {
+	c.mutexLock.RLock()
+	defer c.mutexLock.RUnlock()
+
+	return c.lastSupplyHistoryUpdate
 }

@@ -83,6 +83,41 @@ message GetLatestDataResponse {
   QubicData data = 1;
 }
 
+// Supply history
+
+message SupplyHistoryPoint {
+  uint32 epoch = 1;
+  // Circulating supply at the end of this epoch, as measured by the spectrum file that was dumped
+  // at the transition into the next one.
+  int64 circulating_supply = 2;
+  // Cumulative issuance up to and including this epoch.
+  int64 total_emitted = 3;
+  // When this epoch closed, in unix seconds. Display only.
+  int64 timestamp = 4;
+  // How the supply of this point was obtained. "spectrum" and "derived" are measured values,
+  // "carried-over" means that no spectrum file could be attributed to this epoch and the supply of
+  // an earlier one is repeated, which shows up as an epoch without any burn.
+  string supply_source = 5;
+}
+
+message GetSupplyHistoryRequest {
+  // Inclusive. Defaults to the earliest available epoch.
+  uint32 from_epoch = 1;
+  // Inclusive. Defaults to the latest available epoch.
+  uint32 to_epoch = 2;
+  // Maximum number of points. The most recent ones are kept when the range holds more.
+  int32 limit = 3;
+}
+
+message GetSupplyHistoryResponse {
+  // Maximum amount of QUs that can ever exist. Constant, for a reference line.
+  int64 supply_cap = 1;
+  uint32 current_epoch = 2;
+  int64 current_circulating_supply = 3;
+  // Ordered by epoch ascending.
+  repeated SupplyHistoryPoint points = 4;
+}
+
 service StatsService {
 
   // Returns the latest available chain information.
@@ -102,6 +137,14 @@ service StatsService {
   rpc GetAssetOwners(GetAssetOwnershipRequest) returns (GetAssetOwnershipResponse) {
     option (google.api.http) = {
       get: "/v1/issuers/{issuer_identity}/assets/{asset_name}/owners"
+    };
+  };
+
+  // Returns the circulating supply per epoch, one point per completed epoch, ordered by epoch
+  // ascending. The epoch in progress is reported separately as current_epoch.
+  rpc GetSupplyHistory(GetSupplyHistoryRequest) returns (GetSupplyHistoryResponse) {
+    option (google.api.http) = {
+      get: "/v1/supply-history"
     };
   };
 
