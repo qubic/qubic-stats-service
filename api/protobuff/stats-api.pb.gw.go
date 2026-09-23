@@ -301,7 +301,7 @@ func RegisterStatsServiceHandlerServer(ctx context.Context, mux *runtime.ServeMu
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
 		var err error
 		var annotatedContext context.Context
-		annotatedContext, err = runtime.AnnotateIncomingContext(ctx, mux, req, "/qubic.stats.api.pb.StatsService/GetSupplyHistory", runtime.WithHTTPPathPattern("/v1/stats/supply-history"))
+		annotatedContext, err = runtime.AnnotateIncomingContext(ctx, mux, req, "/qubic.stats.api.pb.StatsService/GetSupplyHistory", runtime.WithHTTPPathPattern("/v1/supply-history"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -431,7 +431,7 @@ func RegisterStatsServiceHandlerClient(ctx context.Context, mux *runtime.ServeMu
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
 		var err error
 		var annotatedContext context.Context
-		annotatedContext, err = runtime.AnnotateContext(ctx, mux, req, "/qubic.stats.api.pb.StatsService/GetSupplyHistory", runtime.WithHTTPPathPattern("/v1/stats/supply-history"))
+		annotatedContext, err = runtime.AnnotateContext(ctx, mux, req, "/qubic.stats.api.pb.StatsService/GetSupplyHistory", runtime.WithHTTPPathPattern("/v1/supply-history"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -457,7 +457,7 @@ var (
 
 	pattern_StatsService_GetAssetOwners_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3, 1, 0, 4, 1, 5, 4, 2, 5}, []string{"v1", "issuers", "issuer_identity", "assets", "asset_name", "owners"}, ""))
 
-	pattern_StatsService_GetSupplyHistory_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"v1", "stats", "supply-history"}, ""))
+	pattern_StatsService_GetSupplyHistory_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"v1", "supply-history"}, ""))
 )
 
 var (

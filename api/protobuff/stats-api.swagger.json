@@ -129,7 +129,7 @@
         ]
       }
     },
-    "/v1/stats/supply-history": {
+    "/v1/supply-history": {
       "get": {
         "summary": "Returns the circulating supply per epoch, one point per completed epoch, ordered by epoch\nascending. The epoch in progress is reported separately as current_epoch.",
         "operationId": "StatsService_GetSupplyHistory",
