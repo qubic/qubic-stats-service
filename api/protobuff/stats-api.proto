@@ -144,7 +144,7 @@ service StatsService {
   // ascending. The epoch in progress is reported separately as current_epoch.
   rpc GetSupplyHistory(GetSupplyHistoryRequest) returns (GetSupplyHistoryResponse) {
     option (google.api.http) = {
-      get: "/v1/stats/supply-history"
+      get: "/v1/supply-history"
     };
   };
 
