@@ -29,7 +29,7 @@ const (
 	epochStartProbePageSize = 100
 	// epochStartProbePages bounds that search. An epoch that opens with more empty ticks than this
 	// falls back to an estimated start timestamp.
-	epochStartProbePages = 3
+	epochStartProbePages = 10
 	// millisecondsPerSecond converts the tick timestamps of the query service, which are in
 	// milliseconds, to the unix seconds the stats are kept in.
 	millisecondsPerSecond = 1000
