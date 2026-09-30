@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"github.com/qubic/qubic-stats-processor/epochstats"
 	"github.com/qubic/qubic-stats-processor/service"
 	"github.com/qubic/qubic-stats-processor/spectrum"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -47,7 +45,6 @@ type Configuration struct {
 		Options  string
 
 		Database             string `conf:"default:qubic_frontend"`
-		SpectrumCollection   string `conf:"default:spectrum_data"`
 		DataCollection       string `conf:"default:general_data"`
 		RichListCollection   string `conf:"default:rich_list"`
 		EpochStatsCollection string `conf:"default:epoch_stats"`
@@ -70,10 +67,8 @@ func validateConfig(config *Configuration) error {
 		break
 	case "spectrum_parser":
 		break
-	case "backfill_epoch_stats":
-		break
 	default:
-		return errors.New("Bad app mode. Accepted values: 'service', 'spectrum_parser', 'backfill_epoch_stats'")
+		return errors.New("Bad app mode. Accepted values: 'service', 'spectrum_parser'")
 	}
 
 	switch config.SpectrumParser.OutputMode {
@@ -152,7 +147,6 @@ func run() error {
 
 			MongoClient:               client,
 			MongoDatabase:             config.Mongo.Database,
-			MongoSpectrumCollection:   config.Mongo.SpectrumCollection,
 			MongoQubicDataCollection:  config.Mongo.DataCollection,
 			MongoEpochStatsCollection: config.Mongo.EpochStatsCollection,
 
@@ -197,15 +191,15 @@ func run() error {
 			break
 		}
 
-		epochNumber, err := parseEpochFromFileName(config.SpectrumParser.SpectrumFile)
+		spectrumEpoch, err := parseEpochFromFileName(config.SpectrumParser.SpectrumFile)
 		if err != nil {
 			return errors.Wrap(err, "reading epoch from spectrum file name")
 		}
-		epoch := strconv.FormatUint(uint64(epochNumber), 10)
 
-		// The epoch the measurement belongs to is what lets the service tell a fresh supply from one
-		// that is carried over from an earlier epoch.
-		results.Data.Epoch = epochNumber
+		record, err := epochstats.NewRecord(spectrumEpoch, results.Data.CirculatingSupply, results.Data.ActiveAddresses)
+		if err != nil {
+			return errors.Wrap(err, "building epoch stats record")
+		}
 
 		mongoConnection := MongoConfiguration{
 			Username:          config.Mongo.Username,
@@ -227,94 +221,14 @@ func run() error {
 			}
 		}()
 
-		err = results.Data.SaveSpectrumDataToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
+		err = saveSpectrumResults(context.Background(), client, &config, record, results.List)
 		if err != nil {
-			return errors.Wrap(err, "saving spectrum data")
-		}
-
-		richListCollection := config.Mongo.RichListCollection + "_" + epoch
-
-		err = spectrum.SaveRichListToDatabase(context.Background(), client, config.Mongo.Database, richListCollection, results.List)
-		if err != nil {
-			return errors.Wrap(err, "saving rich list")
-		}
-
-		// The rich lists of earlier epochs are only dropped once the new one is in place, so that the
-		// api never queries a collection that has just been removed.
-		err = purgeOldEpochCollections(client, config.Mongo.Database, config.Mongo.RichListCollection, richListCollection)
-		if err != nil {
-			return fmt.Errorf("purging old epoch rich lists: %w", err)
-		}
-
-		latestData, err := spectrum.LoadSpectrumDataFromDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
-		if err != nil {
-			return errors.Wrap(err, "reading back spectrum data")
-		}
-
-		fmt.Printf("Latest data read from db: Epoch: %d, Circ supply: %d, Active addr: %d Update timestamp: %d\n", latestData.Epoch, latestData.CirculatingSupply, latestData.ActiveAddresses, latestData.Timestamp)
-		break
-
-	case "backfill_epoch_stats":
-
-		println("Epoch stats backfill")
-
-		mongoConnection := MongoConfiguration{
-			Username:          config.Mongo.Username,
-			Password:          config.Mongo.Password,
-			Hostname:          config.Mongo.Hostname,
-			Port:              config.Mongo.Port,
-			ConnectionOptions: config.Mongo.Options,
-		}
-
-		println("Connecting to database...")
-		client, err := createMongoClient(&mongoConnection)
-		if err != nil {
-			return errors.Wrap(err, "connecting to database")
-		}
-
-		defer func() {
-			if err = client.Disconnect(context.Background()); err != nil {
-				log.Fatalf("main: exited with error: %s\n", err.Error())
-			}
-		}()
-
-		err = runEpochStatsBackfill(context.Background(), client, &config)
-		if err != nil {
-			return errors.Wrap(err, "backfilling epoch stats")
+			return err
 		}
 
 		break
 	}
 
-	return nil
-}
-
-// purgeOldEpochCollections drops the per epoch rich list collections, except the one that was just
-// written. Only collections named like "<base>_<epoch>" are considered, so that anything else that
-// happens to share the prefix is left alone.
-func purgeOldEpochCollections(mongoClient *mongo.Client, database string, richListCollectionBase string, keep string) error {
-
-	db := mongoClient.Database(database)
-	collections, err := db.ListCollectionNames(context.Background(), bson.D{})
-	if err != nil {
-		return fmt.Errorf("getting list of mongo collection names: %w", err)
-	}
-
-	pattern, err := regexp.Compile("^" + regexp.QuoteMeta(richListCollectionBase) + `_\d+$`)
-	if err != nil {
-		return fmt.Errorf("compiling rich list collection pattern: %w", err)
-	}
-
-	for _, c := range collections {
-		if c == keep || !pattern.MatchString(c) {
-			continue
-		}
-		err := db.Collection(c).Drop(context.Background())
-		if err != nil {
-			return fmt.Errorf("dropping collection %s: %w", c, err)
-		}
-		fmt.Printf("Dropped epoch rich list collection: %s\n", c)
-	}
 	return nil
 }
 
@@ -335,45 +249,34 @@ func parseEpochFromFileName(fileName string) (uint32, error) {
 	return uint32(epoch), nil
 }
 
-// runEpochStatsBackfill reconstructs the per epoch supply history from the historical general data
-// and writes the records that do not exist yet. Existing records are never modified.
-func runEpochStatsBackfill(ctx context.Context, client *mongo.Client, config *Configuration) error {
+// saveSpectrumResults stores what a spectrum file measured. The epoch record is always written, so
+// that older spectrum files can be parsed to fill in the supply history. The rich list is only
+// replaced when the file is at least as recent as every other one parsed so far.
+func saveSpectrumResults(ctx context.Context, client *mongo.Client, config *Configuration, record epochstats.Record, richList spectrum.RichList) error {
 
-	println("Reconstructing epoch stats from the general data...")
-
-	report, err := epochstats.BuildBackfill(ctx, client, config.Mongo.Database, config.Mongo.DataCollection, config.Mongo.SpectrumCollection)
+	latest, found, err := epochstats.LoadLatest(ctx, client, config.Mongo.Database, config.Mongo.EpochStatsCollection)
 	if err != nil {
-		return fmt.Errorf("building backfill: %w", err)
+		return errors.Wrap(err, "loading latest epoch stats record")
 	}
 
-	if len(report.Records) == 0 {
-		println("No general data to reconstruct from. Nothing written.")
-		return nil
+	// The rich list is replaced before the record is written, so that the rich list is already in
+	// place once the record makes the api report the new epoch.
+	if !found || record.Epoch >= latest.Epoch {
+		err = spectrum.ReplaceRichList(ctx, client, config.Mongo.Database, config.Mongo.RichListCollection, richList)
+		if err != nil {
+			return errors.Wrap(err, "replacing rich list")
+		}
+	} else {
+		fmt.Printf("Epoch %d is older than the latest stored epoch %d. Keeping the current rich list.\n", record.Epoch, latest.Epoch)
 	}
 
-	first := report.Records[0]
-	last := report.Records[len(report.Records)-1]
-
-	fmt.Printf("Reconstructed %d epochs, %d to %d.\n", len(report.Records), first.Epoch, last.Epoch)
-	fmt.Printf("  Epoch %d: supply %d, emitted %d, ended %d\n", first.Epoch, first.CirculatingSupply, first.TotalEmitted, first.EpochEndTimestamp)
-	fmt.Printf("  Epoch %d: supply %d, emitted %d, ended %d\n", last.Epoch, last.CirculatingSupply, last.TotalEmitted, last.EpochEndTimestamp)
-
-	if len(report.MissingEpochs) > 0 {
-		fmt.Printf("WARNING: no general data for %d epoch(s) in the range: %v\n", len(report.MissingEpochs), report.MissingEpochs)
-	}
-	if len(report.CarriedOverEpochs) > 0 {
-		fmt.Printf("WARNING: %d epoch(s) have no spectrum measurement of their own and repeat an earlier supply: %v\n", len(report.CarriedOverEpochs), report.CarriedOverEpochs)
-	}
-	if len(report.SupplyMismatches) > 0 {
-		fmt.Printf("WARNING: %d epoch(s) where the spectrum measurement disagrees with the derived supply: %v\n", len(report.SupplyMismatches), report.SupplyMismatches)
-	}
-
-	written, err := epochstats.InsertMissing(ctx, client, config.Mongo.Database, config.Mongo.EpochStatsCollection, report.Records)
+	err = epochstats.Save(ctx, client, config.Mongo.Database, config.Mongo.EpochStatsCollection, record)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "saving epoch stats record")
 	}
 
-	fmt.Printf("Wrote %d new epoch stats record(s), left %d existing one(s) untouched.\n", written, len(report.Records)-written)
+	fmt.Printf("Saved epoch %d: Circ supply: %d, Total emitted: %d, Active addr: %d, Epoch end: %d\n",
+		record.Epoch, record.CirculatingSupply, record.TotalEmitted, record.ActiveAddresses, record.EpochEndTimestamp)
 
 	return nil
 }

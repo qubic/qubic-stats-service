@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -11,15 +12,16 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+// latestQubicDataID is the id of the general data document the processor keeps up to date.
+const latestQubicDataID = "latest"
+
 type ServiceConfiguration struct {
 	MongoDatabase             string
-	MongoSpectrumCollection   string
 	MongoQubicDataCollection  string
 	MongoRichListCollection   string
 	MongoEpochStatsCollection string
 
-	CacheValidityDuration    time.Duration
-	SpectrumValidityDuration time.Duration
+	CacheValidityDuration time.Duration
 
 	RichListPageSize int32
 
@@ -31,13 +33,11 @@ type Service struct {
 
 	mongoClient               *mongo.Client
 	mongoDatabase             string
-	mongoSpectrumCollection   string
 	mongoQubicDataCollection  string
 	mongoRichListCollection   string
 	mongoEpochStatsCollection string
 
-	cacheValidityDuration    time.Duration
-	spectrumValidityDuration time.Duration
+	cacheValidityDuration time.Duration
 
 	cacheUpdateTimeout time.Duration
 
@@ -50,13 +50,11 @@ func NewCacheService(configuration *ServiceConfiguration, mongoClient *mongo.Cli
 
 		mongoClient:               mongoClient,
 		mongoDatabase:             configuration.MongoDatabase,
-		mongoSpectrumCollection:   configuration.MongoSpectrumCollection,
 		mongoQubicDataCollection:  configuration.MongoQubicDataCollection,
 		mongoRichListCollection:   configuration.MongoRichListCollection,
 		mongoEpochStatsCollection: configuration.MongoEpochStatsCollection,
 
-		cacheValidityDuration:    configuration.CacheValidityDuration,
-		spectrumValidityDuration: configuration.SpectrumValidityDuration,
+		cacheValidityDuration: configuration.CacheValidityDuration,
 
 		richListPageSize: configuration.RichListPageSize,
 
@@ -74,13 +72,7 @@ func (s *Service) Start() chan bool {
 			ticker.Reset(s.cacheValidityDuration)
 			println("Updating...")
 
-			lastSpectrumDataUpdate := s.Cache.GetLastSpectrumDataUpdate()
-			nextSpectrumUpdate := lastSpectrumDataUpdate.Add(s.spectrumValidityDuration)
-
-			// Either the refresh interval has passed, or nothing has been cached yet.
-			updateSpectrum := !nextSpectrumUpdate.After(time.Now()) || s.Cache.GetSpectrumData().CirculatingSupply == 0
-
-			err := s.updateCache(updateSpectrum, true)
+			err := s.updateCache()
 			if err != nil {
 				fmt.Printf("Failed to update Cache. Error: %v\n", err)
 				continue
@@ -93,46 +85,35 @@ func (s *Service) Start() chan bool {
 	return exit
 }
 
-func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) error {
-	var qubicData QubicData
-	var spectrumData SpectrumData
-	var err error
+// updateCache reloads the latest data and the supply history. The two are independent, so failing
+// to load one still refreshes the other and keeps the previously cached one.
+func (s *Service) updateCache() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.cacheUpdateTimeout)
 	defer cancel()
 
-	if updateQubicData {
-		println("Updated Qubic data")
-		qubicData, err = s.fetchQubicData(ctx)
-		if err != nil {
-			return errors.Wrap(err, "fetching qubic data")
-		}
+	var errs []error
+
+	qubicData, err := s.fetchQubicData(ctx)
+	if err != nil {
+		errs = append(errs, errors.Wrap(err, "fetching qubic data"))
+	} else {
+		s.Cache.UpdateQubicData(qubicData)
 	}
 
-	if updateSpectrumData {
-		spectrumData, err = s.fetchSpectrumData(ctx)
-		println("Updated spectrum data")
-		if err != nil {
-			return errors.Wrap(err, "fetching spectrum data")
-		}
-	}
-
-	s.Cache.UpdateDataCache(spectrumData, qubicData)
-
-	// The supply history is small and immutable per epoch, so it is simply reloaded in full. Failing
-	// to load it must not hold back the rest of the cache.
+	// The supply history is small, so it is simply reloaded in full.
 	supplyHistory, err := s.fetchSupplyHistory(ctx)
 	if err != nil {
-		fmt.Printf("Failed to update supply history. Error: %v\n", err)
+		errs = append(errs, errors.Wrap(err, "fetching supply history"))
 	} else {
 		s.Cache.UpdateSupplyHistory(supplyHistory)
 	}
 
-	return nil
+	return stderrors.Join(errs...)
 }
 
 // fetchSupplyHistory loads every epoch stats record, oldest epoch first. An empty collection is not
-// an error: the records only appear once the processor has written or backfilled them.
+// an error: the records only appear once the processor has parsed a spectrum file.
 func (s *Service) fetchSupplyHistory(ctx context.Context) (SupplyHistory, error) {
 	collection := s.mongoClient.Database(s.mongoDatabase).Collection(s.mongoEpochStatsCollection)
 
@@ -151,30 +132,13 @@ func (s *Service) fetchSupplyHistory(ctx context.Context) (SupplyHistory, error)
 	return supplyHistory, nil
 }
 
-func (s *Service) fetchSpectrumData(ctx context.Context) (SpectrumData, error) {
-	collection := s.mongoClient.Database(s.mongoDatabase).Collection(s.mongoSpectrumCollection)
-
-	var spectrumData SpectrumData
-
-	opts := options.FindOne().SetSort(bson.M{"$natural": -1})
-
-	result := collection.FindOne(ctx, bson.D{}, opts)
-	err := result.Decode(&spectrumData)
-	if err != nil {
-		return SpectrumData{}, errors.Wrap(err, "decoding database response")
-	}
-
-	return spectrumData, nil
-}
-
 func (s *Service) fetchQubicData(ctx context.Context) (QubicData, error) {
 	collection := s.mongoClient.Database(s.mongoDatabase).Collection(s.mongoQubicDataCollection)
 
 	var qubicData QubicData
 
-	opts := options.FindOne().SetSort(bson.M{"$natural": -1})
-
-	result := collection.FindOne(ctx, bson.D{}, opts)
+	// The processor keeps a single document, which it overwrites on every scrape.
+	result := collection.FindOne(ctx, bson.D{{Key: "_id", Value: latestQubicDataID}})
 	err := result.Decode(&qubicData)
 	if err != nil {
 		return QubicData{}, errors.Wrap(err, "decoding database response")

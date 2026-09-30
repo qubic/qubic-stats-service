@@ -386,11 +386,7 @@
         "timestamp": {
           "type": "string",
           "format": "int64",
-          "description": "When this epoch closed, in unix seconds. Display only."
-        },
-        "supplySource": {
-          "type": "string",
-          "description": "How the supply of this point was obtained. \"spectrum\" and \"derived\" are measured values,\n\"carried-over\" means that no spectrum file could be attributed to this epoch and the supply of\nan earlier one is repeated, which shows up as an epoch without any burn."
+          "description": "When this epoch ended, in unix seconds. Epochs change every Wednesday at 12:00 UTC."
         }
       }
     },

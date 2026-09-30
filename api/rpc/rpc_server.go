@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"regexp"
-	"strconv"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/pkg/errors"
@@ -46,21 +45,23 @@ type Server struct {
 func (s *Server) GetLatestData(_ context.Context, _ *emptypb.Empty) (*protobuff.GetLatestDataResponse, error) {
 
 	qubicData := s.cache.GetQubicData()
-	spectrumData := s.cache.GetSpectrumData()
+	// The supply related figures come from the latest completed epoch, the same record the supply
+	// history ends with, so that the two endpoints cannot disagree.
+	epochStats, _ := s.cache.GetLatestEpochStats()
 
 	return &protobuff.GetLatestDataResponse{
 		Data: &protobuff.QubicData{
 			Timestamp:                qubicData.Timestamp,
 			Price:                    qubicData.Price,
-			CirculatingSupply:        spectrumData.CirculatingSupply,
-			ActiveAddresses:          int32(spectrumData.ActiveAddresses),
+			CirculatingSupply:        epochStats.CirculatingSupply,
+			ActiveAddresses:          int32(epochStats.ActiveAddresses),
 			MarketCap:                qubicData.MarketCap,
 			Epoch:                    qubicData.Epoch,
 			CurrentTick:              qubicData.CurrentTick,
 			TicksInCurrentEpoch:      qubicData.TicksInCurrentEpoch,
 			EmptyTicksInCurrentEpoch: qubicData.EmptyTicksInCurrentEpoch,
 			EpochTickQuality:         qubicData.EpochTickQuality,
-			BurnedQus:                qubicData.BurnedQUs,
+			BurnedQus:                uint64(epochStats.BurnedQUs()),
 			TicksInLast10000:         qubicData.TicksInLast10000,
 			EmptyTicksInLast10000:    qubicData.EmptyTicksInLast10000,
 			Last10000TickQuality:     qubicData.Last10000TickQuality,
@@ -89,10 +90,16 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 		limit -= (start + limit) - s.richListLimit // ensure that we are not requesting records than the limit for the last page
 	}
 
-	epoch := s.cache.GetQubicData().Epoch
-	epochString := strconv.Itoa(int(epoch))
+	// The rich list is replaced together with the latest record, from the same spectrum file.
+	epochStats, found := s.cache.GetLatestEpochStats()
+	if !found {
+		return nil, status.Error(codes.Unavailable, "rich list not available yet")
+	}
+	// The spectrum file of epoch N holds the end state of epoch N-1, which is what the rich list shows
+	// during epoch N.
+	epoch := epochStats.Epoch + 1
 
-	dbRecordCount := s.cache.GetSpectrumData().ActiveAddresses
+	dbRecordCount := epochStats.ActiveAddresses
 	totalRecords := min(dbRecordCount, s.richListLimit) // we do not want to expose the full rich list
 
 	pagination, err := getPaginationInformation(totalRecords, pageNumber+1, pageSize)
@@ -103,20 +110,11 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid page for current page size (maximum is %d)", pagination.TotalPages)
 	}
 
-	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection + "_" + epochString)
+	collection := s.dbClient.Database(s.mongoDatabase).Collection(s.mongoRichListCollection)
 
 	results, err := queryRichListByRank(ctx, collection, start, limit)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "cannot get rich list section from the database. error: %v", err)
-	}
-
-	// A rich list written before the processor stored the rank holds no rank to range over. Sorting
-	// keeps such an epoch served until the next spectrum parse has rewritten the collection.
-	if len(results) == 0 && start < totalRecords {
-		results, err = queryRichListByBalance(ctx, collection, start, limit)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "cannot get rich list section from the database. error: %v", err)
-		}
 	}
 
 	var list []*protobuff.RichListEntity
@@ -139,7 +137,7 @@ func (s *Server) GetRichListSlice(ctx context.Context, request *protobuff.GetRic
 }
 
 // queryRichListByRank reads a page of the rich list with an indexed range scan over the rank the
-// processor stored, which costs nothing to page deeply into.
+// processor stored, which stays cheap however deep the page is.
 func queryRichListByRank(ctx context.Context, collection *mongo.Collection, start, limit int) (cache.RichList, error) {
 
 	filter := bson.D{{Key: "rank", Value: bson.D{
@@ -151,29 +149,6 @@ func queryRichListByRank(ctx context.Context, collection *mongo.Collection, star
 	cursor, err := collection.Find(ctx, filter, findOptions)
 	if err != nil {
 		return nil, errors.Wrap(err, "querying rich list by rank")
-	}
-
-	var results cache.RichList
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, errors.Wrap(err, "decoding rich list")
-	}
-
-	return results, nil
-}
-
-// queryRichListByBalance is the pre rank way of reading a page and sorts the whole collection. It
-// only serves rich lists that were written before the rank existed.
-func queryRichListByBalance(ctx context.Context, collection *mongo.Collection, start, limit int) (cache.RichList, error) {
-
-	findOptions := options.Find().
-		SetSkip(int64(start)).
-		SetLimit(int64(limit)).
-		SetSort(bson.D{{Key: "balance", Value: -1}}).
-		SetAllowDiskUse(true) // the collection is neither indexed nor small enough to sort in memory
-
-	cursor, err := collection.Find(ctx, bson.D{}, findOptions)
-	if err != nil {
-		return nil, errors.Wrap(err, "querying rich list by balance")
 	}
 
 	var results cache.RichList
@@ -222,7 +197,6 @@ func (s *Server) GetSupplyHistory(_ context.Context, request *protobuff.GetSuppl
 			CirculatingSupply: record.CirculatingSupply,
 			TotalEmitted:      record.TotalEmitted,
 			Timestamp:         record.EpochEndTimestamp,
-			SupplySource:      record.SupplySource,
 		})
 	}
 
@@ -231,11 +205,13 @@ func (s *Server) GetSupplyHistory(_ context.Context, request *protobuff.GetSuppl
 		points = points[len(points)-limit:]
 	}
 
+	// Read from the same place GetLatestData reads it, so that the two endpoints cannot disagree.
+	epochStats, _ := s.cache.GetLatestEpochStats()
+
 	return &protobuff.GetSupplyHistoryResponse{
-		SupplyCap:    supplyCap,
-		CurrentEpoch: s.cache.GetQubicData().Epoch,
-		// Read from the same place GetLatestData reads it, so that the two endpoints cannot disagree.
-		CurrentCirculatingSupply: s.cache.GetSpectrumData().CirculatingSupply,
+		SupplyCap:                supplyCap,
+		CurrentEpoch:             s.cache.GetQubicData().Epoch,
+		CurrentCirculatingSupply: epochStats.CirculatingSupply,
 		Points:                   points,
 	}, nil
 }

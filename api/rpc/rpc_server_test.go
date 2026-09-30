@@ -5,6 +5,8 @@ import (
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"log"
 	"testing"
 )
@@ -22,27 +24,23 @@ func (fas FakeAssetService) GetOwnedAssets(context.Context, string, string, Page
 func Test_RpcServer_GetLatestData(t *testing.T) {
 
 	dataCache := &cache.Cache{}
-	dataCache.UpdateDataCache(
-		cache.SpectrumData{
-			Timestamp:         1234,
-			CirculatingSupply: 100000000,
-			ActiveAddresses:   555,
-		},
-		cache.QubicData{
-			Timestamp:                5678,
-			Price:                    0.000002,
-			MarketCap:                200,
-			Epoch:                    42,
-			CurrentTick:              123456,
-			TicksInCurrentEpoch:      20000,
-			EmptyTicksInCurrentEpoch: 119,
-			EpochTickQuality:         99.405,
-			BurnedQUs:                12345,
-			TicksInLast10000:         10000,
-			EmptyTicksInLast10000:    41,
-			Last10000TickQuality:     99.59,
-		},
-	)
+	dataCache.UpdateQubicData(cache.QubicData{
+		Timestamp:                5678,
+		Price:                    0.000002,
+		MarketCap:                200,
+		Epoch:                    42,
+		CurrentTick:              123456,
+		TicksInCurrentEpoch:      20000,
+		EmptyTicksInCurrentEpoch: 119,
+		EpochTickQuality:         99.405,
+		TicksInLast10000:         10000,
+		EmptyTicksInLast10000:    41,
+		Last10000TickQuality:     99.59,
+	})
+	dataCache.UpdateSupplyHistory(cache.SupplyHistory{
+		{Epoch: 40, CirculatingSupply: 39_000_000_000_000, TotalEmitted: 40_000_000_000_000, ActiveAddresses: 444},
+		{Epoch: 41, CirculatingSupply: 39_500_000_000_000, TotalEmitted: 41_000_000_000_000, ActiveAddresses: 555},
+	})
 
 	server := Server{cache: dataCache}
 
@@ -52,7 +50,7 @@ func Test_RpcServer_GetLatestData(t *testing.T) {
 	assert.Equal(t, &protobuff.QubicData{
 		Timestamp:                5678,
 		Price:                    0.000002,
-		CirculatingSupply:        100000000,
+		CirculatingSupply:        39_500_000_000_000, // from the latest completed epoch
 		ActiveAddresses:          555,
 		MarketCap:                200,
 		Epoch:                    42,
@@ -60,11 +58,34 @@ func Test_RpcServer_GetLatestData(t *testing.T) {
 		TicksInCurrentEpoch:      20000,
 		EmptyTicksInCurrentEpoch: 119,
 		EpochTickQuality:         99.405,
-		BurnedQus:                12345,
+		BurnedQus:                1_500_000_000_000, // emitted up to epoch 41 minus its supply
 		TicksInLast10000:         10000,
 		EmptyTicksInLast10000:    41,
 		Last10000TickQuality:     99.59,
 	}, response.GetData())
+}
+
+func Test_RpcServer_GetLatestData_givenNoEpochStats_thenSupplyIsZero(t *testing.T) {
+
+	dataCache := &cache.Cache{}
+	dataCache.UpdateQubicData(cache.QubicData{Timestamp: 5678, Epoch: 42})
+
+	server := Server{cache: dataCache}
+
+	response, err := server.GetLatestData(context.Background(), nil)
+	assert.NoError(t, err)
+
+	assert.Equal(t, uint32(42), response.GetData().GetEpoch())
+	assert.Zero(t, response.GetData().GetCirculatingSupply())
+	assert.Zero(t, response.GetData().GetBurnedQus())
+}
+
+func Test_RpcServer_GetRichListSlice_givenNoEpochStats_thenUnavailable(t *testing.T) {
+
+	server := Server{cache: &cache.Cache{}, richListPageSize: 100, richListLimit: 10000}
+
+	_, err := server.GetRichListSlice(context.Background(), &protobuff.GetRichListSliceRequest{})
+	assert.Equal(t, codes.Unavailable, status.Code(err))
 }
 
 func Test_RpcServer_GetAssetOwners(t *testing.T) {

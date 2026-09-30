@@ -13,7 +13,7 @@ import (
 )
 
 // supplyHistoryServer builds a server over a cache holding the given epochs, where epoch N has a
-// supply of N * 100 and closed at N * 1000.
+// supply of N * 100 and ended at N * 1000. Epoch 43 is in progress.
 func supplyHistoryServer(epochs ...uint32) *Server {
 
 	history := make(cache.SupplyHistory, 0, len(epochs))
@@ -23,16 +23,12 @@ func supplyHistoryServer(epochs ...uint32) *Server {
 			CirculatingSupply: int64(epoch) * 100,
 			TotalEmitted:      int64(epoch) * 1_000_000_000_000,
 			EpochEndTimestamp: int64(epoch) * 1000,
-			SupplySource:      "spectrum",
 		})
 	}
 
 	dataCache := &cache.Cache{}
 	dataCache.UpdateSupplyHistory(history)
-	dataCache.UpdateDataCache(
-		cache.SpectrumData{Timestamp: 1, CirculatingSupply: 4200, ActiveAddresses: 7},
-		cache.QubicData{Timestamp: 1, Epoch: 42},
-	)
+	dataCache.UpdateQubicData(cache.QubicData{Timestamp: 1, Epoch: 43})
 
 	return &Server{cache: dataCache}
 }
@@ -54,15 +50,14 @@ func Test_GetSupplyHistory_givenNoRange_thenWholeHistoryAscending(t *testing.T) 
 
 	assert.Equal(t, []uint32{40, 41, 42}, epochsOf(response.GetPoints()))
 	assert.Equal(t, int64(1_000_000_000_000_000), response.GetSupplyCap())
-	assert.Equal(t, uint32(42), response.GetCurrentEpoch())
-	assert.Equal(t, int64(4200), response.GetCurrentCirculatingSupply())
+	assert.Equal(t, uint32(43), response.GetCurrentEpoch())
+	assert.Equal(t, int64(4200), response.GetCurrentCirculatingSupply()) // the supply at the end of epoch 42
 
 	assert.Equal(t, &protobuff.SupplyHistoryPoint{
 		Epoch:             41,
 		CirculatingSupply: 4100,
 		TotalEmitted:      41_000_000_000_000,
 		Timestamp:         41000,
-		SupplySource:      "spectrum",
 	}, response.GetPoints()[1])
 }
 
@@ -123,7 +118,7 @@ func Test_GetSupplyHistory_givenEmptyHistory_thenNoPointsAndNoError(t *testing.T
 	require.NoError(t, err)
 
 	assert.Empty(t, response.GetPoints())
-	assert.Equal(t, uint32(42), response.GetCurrentEpoch()) // the rest of the response still stands
+	assert.Equal(t, uint32(43), response.GetCurrentEpoch()) // the rest of the response still stands
 }
 
 func Test_GetSupplyHistory_givenInvalidArguments_thenError(t *testing.T) {
@@ -160,4 +155,9 @@ func Test_GetSupplyHistory_thenCurrentSupplyMatchesLatestStats(t *testing.T) {
 
 	assert.Equal(t, latest.GetData().GetCirculatingSupply(), history.GetCurrentCirculatingSupply())
 	assert.Equal(t, latest.GetData().GetEpoch(), history.GetCurrentEpoch())
+
+	// The latest point is the same measurement, so the burn it implies matches too.
+	lastPoint := history.GetPoints()[len(history.GetPoints())-1]
+	assert.Equal(t, latest.GetData().GetCirculatingSupply(), lastPoint.GetCirculatingSupply())
+	assert.Equal(t, int64(latest.GetData().GetBurnedQus()), lastPoint.GetTotalEmitted()-lastPoint.GetCirculatingSupply())
 }

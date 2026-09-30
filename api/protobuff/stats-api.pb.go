@@ -680,12 +680,8 @@ type SupplyHistoryPoint struct {
 	CirculatingSupply int64 `protobuf:"varint,2,opt,name=circulating_supply,json=circulatingSupply,proto3" json:"circulating_supply,omitempty"`
 	// Cumulative issuance up to and including this epoch.
 	TotalEmitted int64 `protobuf:"varint,3,opt,name=total_emitted,json=totalEmitted,proto3" json:"total_emitted,omitempty"`
-	// When this epoch closed, in unix seconds. Display only.
-	Timestamp int64 `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	// How the supply of this point was obtained. "spectrum" and "derived" are measured values,
-	// "carried-over" means that no spectrum file could be attributed to this epoch and the supply of
-	// an earlier one is repeated, which shows up as an epoch without any burn.
-	SupplySource  string `protobuf:"bytes,5,opt,name=supply_source,json=supplySource,proto3" json:"supply_source,omitempty"`
+	// When this epoch ended, in unix seconds. Epochs change every Wednesday at 12:00 UTC.
+	Timestamp     int64 `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -746,13 +742,6 @@ func (x *SupplyHistoryPoint) GetTimestamp() int64 {
 		return x.Timestamp
 	}
 	return 0
-}
-
-func (x *SupplyHistoryPoint) GetSupplySource() string {
-	if x != nil {
-		return x.SupplySource
-	}
-	return ""
 }
 
 type GetSupplyHistoryRequest struct {
@@ -948,13 +937,12 @@ const file_stats_api_proto_rawDesc = "" +
 	"\bidentity\x18\x01 \x01(\tR\bidentity\x12(\n" +
 	"\x10number_of_shares\x18\x02 \x01(\x03R\x0enumberOfShares\"J\n" +
 	"\x15GetLatestDataResponse\x121\n" +
-	"\x04data\x18\x01 \x01(\v2\x1d.qubic.stats.api.pb.QubicDataR\x04data\"\xc1\x01\n" +
+	"\x04data\x18\x01 \x01(\v2\x1d.qubic.stats.api.pb.QubicDataR\x04data\"\x9c\x01\n" +
 	"\x12SupplyHistoryPoint\x12\x14\n" +
 	"\x05epoch\x18\x01 \x01(\rR\x05epoch\x12-\n" +
 	"\x12circulating_supply\x18\x02 \x01(\x03R\x11circulatingSupply\x12#\n" +
 	"\rtotal_emitted\x18\x03 \x01(\x03R\ftotalEmitted\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12#\n" +
-	"\rsupply_source\x18\x05 \x01(\tR\fsupplySource\"i\n" +
+	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\"i\n" +
 	"\x17GetSupplyHistoryRequest\x12\x1d\n" +
 	"\n" +
 	"from_epoch\x18\x01 \x01(\rR\tfromEpoch\x12\x19\n" +

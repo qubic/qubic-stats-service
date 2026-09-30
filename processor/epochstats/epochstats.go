@@ -1,6 +1,8 @@
-// Package epochstats stores one record per epoch: the circulating supply at the start of the epoch,
-// the cumulative issuance up to it and when the epoch started. Records are keyed by epoch, so a
-// record becomes immutable once its epoch has closed and writing one is idempotent.
+// Package epochstats stores one record per completed epoch: the circulating supply and the active
+// addresses at the end of the epoch, the cumulative issuance up to it and when it ended.
+//
+// A record is derived from nothing but a spectrum file and its name, so parsing the same file again
+// always yields the same record, no matter when it happens.
 package epochstats
 
 import (
@@ -12,32 +14,16 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// EmissionPerEpoch is the fixed amount of QUs that is emitted in every epoch.
+// EmissionPerEpoch is the fixed amount of QUs that is emitted at the end of every epoch.
 const EmissionPerEpoch int64 = 1_000_000_000_000
 
-// Provenance of the circulating supply of a record.
 const (
-	// SupplySourceSpectrum means the supply was measured from the spectrum file of that same epoch.
-	SupplySourceSpectrum = "spectrum"
-	// SupplySourceCarriedOver means no spectrum file could be attributed to the epoch, so the supply
-	// of an earlier epoch is repeated. Such a record is an estimate and shows no burn for its epoch.
-	// Only the backfill produces these; a live epoch without a measurement gets no record at all.
-	SupplySourceCarriedOver = "carried-over"
-	// SupplySourceDerived means the supply was reconstructed from the historical general data, where
-	// only the burned QUs were kept. The value is exact, but which epoch it was measured in is not
-	// known, so it may be carried over from an earlier epoch.
-	SupplySourceDerived = "derived"
-)
-
-// Provenance of the epoch start timestamp of a record.
-const (
-	// TimestampSourceTick means the timestamp comes from the first tick of the epoch that holds tick
-	// data, which is the closest we get to the real epoch boundary.
-	TimestampSourceTick = "tick"
-	// TimestampSourceFirstObserved means the timestamp is when the epoch transition was first
-	// noticed rather than a real boundary, which is accurate to the scrape interval at best and off
-	// by the downtime if the service was not running across the transition.
-	TimestampSourceFirstObserved = "first-observed"
+	// epochDuration is the length of an epoch in seconds. Epochs change every Wednesday at 12:00 UTC.
+	epochDuration int64 = 7 * 24 * 60 * 60
+	// referenceEpoch ended at referenceEpochEnd (Wednesday, 2026-09-23 12:00 UTC). Every other epoch
+	// boundary is a whole number of weeks away from it.
+	referenceEpoch    uint32 = 231
+	referenceEpochEnd int64  = 1790164800
 )
 
 // Record is one data point of the per epoch supply history.
@@ -46,12 +32,33 @@ type Record struct {
 	CirculatingSupply int64  `bson:"circulatingSupply"`
 	TotalEmitted      int64  `bson:"totalEmitted"`
 	ActiveAddresses   int    `bson:"activeAddresses"`
-	// EpochEndTimestamp is when the epoch closed, which is the boundary its supply was measured at.
 	EpochEndTimestamp int64  `bson:"epochEndTimestamp"`
-	SpectrumTimestamp int64  `bson:"spectrumTimestamp"`
-	SupplySource      string `bson:"supplySource"`
-	TimestampSource   string `bson:"timestampSource"`
-	UpdatedAt         int64  `bson:"updatedAt"`
+}
+
+// BurnedQUs is the amount of QUs that were emitted up to the end of the epoch but are no longer in
+// circulation.
+func (r Record) BurnedQUs() int64 {
+	return r.TotalEmitted - r.CirculatingSupply
+}
+
+// NewRecord builds the record that the spectrum file of the given epoch stands for.
+//
+// A spectrum file named for epoch N is dumped at the transition into N and holds the end state of
+// epoch N-1, so it is the record of N-1. The epoch in progress has no record until it has closed.
+func NewRecord(spectrumEpoch uint32, circulatingSupply int64, activeAddresses int) (Record, error) {
+
+	if spectrumEpoch < 2 {
+		return Record{}, fmt.Errorf("spectrum epoch %d does not follow a completed epoch", spectrumEpoch)
+	}
+	epoch := spectrumEpoch - 1
+
+	return Record{
+		Epoch:             epoch,
+		CirculatingSupply: circulatingSupply,
+		TotalEmitted:      TotalEmitted(epoch),
+		ActiveAddresses:   activeAddresses,
+		EpochEndTimestamp: EpochEndTimestamp(epoch),
+	}, nil
 }
 
 // TotalEmitted returns the cumulative issuance up to and including the given epoch.
@@ -59,96 +66,42 @@ func TotalEmitted(epoch uint32) int64 {
 	return int64(epoch) * EmissionPerEpoch
 }
 
-// MeasuredEpoch returns the epoch a spectrum file stands for.
-//
-// A spectrum file named for epoch N is dumped at the transition into N and holds the end state of
-// epoch N-1, so it is the authoritative measurement of epoch N-1 and pairs with the issuance of
-// N-1 epochs. The epoch that is in progress has no measurement of its own until it too has closed.
-//
-// It reports false when the spectrum epoch is unknown or too low to name a completed epoch.
-func MeasuredEpoch(spectrumEpoch uint32) (uint32, bool) {
-	if spectrumEpoch < 2 {
-		return 0, false
-	}
-	return spectrumEpoch - 1, true
+// EpochEndTimestamp returns, in unix seconds, when the given epoch ended. This is the scheduled
+// transition, Wednesday 12:00 UTC.
+func EpochEndTimestamp(epoch uint32) int64 {
+	return referenceEpochEnd + (int64(epoch)-int64(referenceEpoch))*epochDuration
 }
 
-// Upsert writes the record of an epoch, creating it if it does not exist yet.
-//
-// An epoch start timestamp that was resolved from tick data replaces whatever is stored. An
-// estimated one is only written when the record is created, so that a good timestamp is never
-// replaced by an estimate once it has been established.
-func Upsert(ctx context.Context, client *mongo.Client, database, collectionName string, record Record) error {
-
-	supplyFields := bson.D{
-		{Key: "circulatingSupply", Value: record.CirculatingSupply},
-		{Key: "totalEmitted", Value: record.TotalEmitted},
-		{Key: "activeAddresses", Value: record.ActiveAddresses},
-		{Key: "spectrumTimestamp", Value: record.SpectrumTimestamp},
-		{Key: "supplySource", Value: record.SupplySource},
-		{Key: "updatedAt", Value: record.UpdatedAt},
-	}
-
-	timestampFields := bson.D{
-		{Key: "epochEndTimestamp", Value: record.EpochEndTimestamp},
-		{Key: "timestampSource", Value: record.TimestampSource},
-	}
-
-	var update bson.D
-	if record.TimestampSource == TimestampSourceTick {
-		update = bson.D{{Key: "$set", Value: append(supplyFields, timestampFields...)}}
-	} else {
-		update = bson.D{
-			{Key: "$set", Value: supplyFields},
-			{Key: "$setOnInsert", Value: timestampFields},
-		}
-	}
+// Save writes the record of an epoch, replacing whatever was stored for it.
+func Save(ctx context.Context, client *mongo.Client, database, collectionName string, record Record) error {
 
 	collection := client.Database(database).Collection(collectionName)
-	_, err := collection.UpdateOne(
+	_, err := collection.ReplaceOne(
 		ctx,
 		bson.D{{Key: "_id", Value: record.Epoch}},
-		update,
-		options.UpdateOne().SetUpsert(true),
+		record,
+		options.Replace().SetUpsert(true),
 	)
 	if err != nil {
-		return fmt.Errorf("upserting epoch stats record for epoch %d: %w", record.Epoch, err)
+		return fmt.Errorf("saving epoch stats record for epoch %d: %w", record.Epoch, err)
 	}
 
 	return nil
 }
 
-// InsertMissing creates the given records but never touches records that already exist. The backfill
-// uses it so that re-running it cannot downgrade a record that the service has meanwhile written
-// from a real spectrum measurement. It returns the number of records that were created.
-func InsertMissing(ctx context.Context, client *mongo.Client, database, collectionName string, records []Record) (int, error) {
-
-	if len(records) == 0 {
-		return 0, nil
-	}
-
-	models := make([]mongo.WriteModel, 0, len(records))
-	for _, record := range records {
-		models = append(models, mongo.NewUpdateOneModel().
-			SetFilter(bson.D{{Key: "_id", Value: record.Epoch}}).
-			SetUpdate(bson.D{{Key: "$setOnInsert", Value: bson.D{
-				{Key: "circulatingSupply", Value: record.CirculatingSupply},
-				{Key: "totalEmitted", Value: record.TotalEmitted},
-				{Key: "activeAddresses", Value: record.ActiveAddresses},
-				{Key: "epochEndTimestamp", Value: record.EpochEndTimestamp},
-				{Key: "spectrumTimestamp", Value: record.SpectrumTimestamp},
-				{Key: "supplySource", Value: record.SupplySource},
-				{Key: "timestampSource", Value: record.TimestampSource},
-				{Key: "updatedAt", Value: record.UpdatedAt},
-			}}}).
-			SetUpsert(true))
-	}
+// LoadLatest returns the record of the most recent epoch. It reports false when there is none yet.
+func LoadLatest(ctx context.Context, client *mongo.Client, database, collectionName string) (Record, bool, error) {
 
 	collection := client.Database(database).Collection(collectionName)
-	result, err := collection.BulkWrite(ctx, models, options.BulkWrite().SetOrdered(false))
+
+	var record Record
+	err := collection.FindOne(ctx, bson.D{}, options.FindOne().SetSort(bson.D{{Key: "_id", Value: -1}})).Decode(&record)
+	if err == mongo.ErrNoDocuments {
+		return Record{}, false, nil
+	}
 	if err != nil {
-		return 0, fmt.Errorf("bulk inserting %d epoch stats records: %w", len(records), err)
+		return Record{}, false, fmt.Errorf("loading latest epoch stats record: %w", err)
 	}
 
-	return int(result.UpsertedCount), nil
+	return record, true, nil
 }

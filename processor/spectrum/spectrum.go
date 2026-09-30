@@ -15,15 +15,11 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 var EmptyAddress [32]byte
 
 type Data struct {
-	// Epoch is the epoch the spectrum file was dumped at, which is the epoch the measured supply
-	// belongs to. Documents written before this field was introduced hold a zero epoch.
-	Epoch             uint32
 	CirculatingSupply int64
 	ActiveAddresses   int
 	Timestamp         int64
@@ -200,65 +196,48 @@ func (d *Data) SaveSpectrumDataToFile(spectrumDataFile string) error {
 
 }
 
-func LoadSpectrumDataFromDatabase(ctx context.Context, dbClient *mongo.Client, database string, spectrumCollection string) (*Data, error) {
-
-	println("Loading spectrum data from database...")
-
-	collection := dbClient.Database(database).Collection(spectrumCollection)
-
-	var result Data
-
-	opts := options.FindOne().SetSort(bson.D{{Key: "timestamp", Value: -1}})
-
-	err := collection.FindOne(ctx, bson.D{}, opts).Decode(&result)
-	if err != nil {
-		return nil, errors.Wrap(err, "getting spectrum data from database")
-	}
-
-	println("Done.")
-
-	return &result, nil
-
-}
-
-func (d *Data) SaveSpectrumDataToDatabase(ctx context.Context, dbClient *mongo.Client, database string, spectrumCollection string) error {
-
-	println("Saving spectrum data to database...")
-
-	collection := dbClient.Database(database).Collection(spectrumCollection)
-
-	_, err := collection.InsertOne(ctx, d)
-	if err != nil {
-		return errors.Wrap(err, "saving spectrum data to database")
-	}
-
-	println("Done.")
-
-	return nil
-}
-
-func SaveRichListToDatabase(ctx context.Context, dbClient *mongo.Client, database string, richListCollection string, richList RichList) error {
+// ReplaceRichList swaps the stored rich list for the given one.
+//
+// The new list is written to a staging collection and indexed first, then renamed over the live
+// collection in a single step, so the api never sees a missing or half written rich list.
+func ReplaceRichList(ctx context.Context, dbClient *mongo.Client, database string, richListCollection string, richList RichList) error {
 	println("Saving rich list to database...")
 
-	collection := dbClient.Database(database).Collection(richListCollection)
+	stagingCollectionName := richListCollection + "_staging"
+	staging := dbClient.Database(database).Collection(stagingCollectionName)
+
+	// A parse that failed half way may have left a staging collection behind.
+	err := staging.Drop(ctx)
+	if err != nil {
+		return errors.Wrap(err, "dropping leftover rich list staging collection")
+	}
 
 	list := make([]interface{}, len(richList))
 	for index, value := range richList {
 		list[index] = value
 	}
 
-	_, err := collection.InsertMany(ctx, list)
+	_, err = staging.InsertMany(ctx, list)
 	if err != nil {
-		return errors.Wrap(err, "saving rich list to database")
+		return errors.Wrap(err, "saving rich list to staging collection")
 	}
 
 	// Built after the insert, which is cheaper than maintaining it while writing half a million
 	// entries. The api pages through the list by rank.
-	_, err = collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	_, err = staging.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{{Key: "rank", Value: 1}},
 	})
 	if err != nil {
 		return errors.Wrap(err, "creating rich list rank index")
+	}
+
+	err = dbClient.Database("admin").RunCommand(ctx, bson.D{
+		{Key: "renameCollection", Value: database + "." + stagingCollectionName},
+		{Key: "to", Value: database + "." + richListCollection},
+		{Key: "dropTarget", Value: true},
+	}).Err()
+	if err != nil {
+		return errors.Wrap(err, "renaming rich list staging collection")
 	}
 
 	println("Done.")

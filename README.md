@@ -29,65 +29,48 @@ The service is made up of three parts:
 ### The Processor
 The processor is responsible for calculating and saving the information to the database.
 
-It has three modes of operation: `service`, `spectrum_parser` and `backfill_epoch_stats`.
-The `service` mode will continuously scrape, calculate and save data.
+It has two modes of operation: `service` and `spectrum_parser`.
+The `service` mode will continuously scrape, calculate and save data. It keeps a single document in
+the `general_data` collection, which every scrape overwrites.
 The `spectrum_parser` mode is used to calculate and save spectrum related data in the database.
-The `backfill_epoch_stats` mode is a one off migration, described below.
 
 > Please refer to `./setupSpectrumData.sh` for an example on how to use `spectrum_parser` mode.
 
 #### Supply history
 
-The `service` mode keeps one record per epoch in the `epoch_stats` collection, holding the
-circulating supply at the end of the epoch, the cumulative issuance up to it and when the epoch
-closed. Records are keyed by epoch, so writing one is idempotent. The API serves them through
-`/v1/stats/supply-history`.
+The `spectrum_parser` mode keeps one record per completed epoch in the `epoch_stats` collection. A
+record holds the circulating supply and the active addresses at the end of the epoch, the cumulative
+issuance up to it and when the epoch ended.
 
 A spectrum file named for epoch `N` is dumped at the transition into `N` and holds the **end state of
-epoch `N-1`**, so it is the authoritative measurement of epoch `N-1` and pairs with `(N-1) * 1e12` of
-issuance. Records therefore only ever exist for epochs that have closed; the epoch in progress has no
-data point until its own spectrum file has been parsed, and is reported separately by the API as
-`currentEpoch` and `currentCirculatingSupply`.
+epoch `N-1`**, so it produces the record of epoch `N-1`:
 
-Because the measurement carries the epoch it belongs to, it does not matter how long after the
-transition the spectrum file turns up. A file that only becomes available once the following epoch
-has started is still attributed to the epoch it actually measured.
+| Field               | Value                                                                  |
+|---------------------|------------------------------------------------------------------------|
+| `circulatingSupply` | Sum of all balances in the file.                                       |
+| `activeAddresses`   | Number of addresses in the file.                                       |
+| `totalEmitted`      | `(N-1) * 1e12`, as 1T QU is emitted at the end of every epoch.          |
+| `epochEndTimestamp` | Wednesday 12:00 UTC at which epoch `N-1` ended, calculated from `N`.    |
 
-Every record states where its numbers came from:
+A record depends on nothing but the file, so parsing a file again always writes the same record.
+The epoch in progress has no record until it has ended and its spectrum file has been parsed.
 
-| `supplySource`  | Meaning                                                                        |
-|-----------------|--------------------------------------------------------------------------------|
-| `spectrum`      | Measured from the spectrum file that closed the epoch. Authoritative.           |
-| `derived`       | Reconstructed by the backfill from the historical general data. Exact value.    |
-| `carried-over`  | Backfill only: no spectrum file could be attributed, so an earlier supply is repeated. |
+The most recent record is also the source of the circulating supply, the active addresses and the
+burned QUs (`totalEmitted - circulatingSupply`) that `/v1/latest-stats` reports, and of the rich
+list's epoch. The service refuses to scrape until at least one record exists.
 
-A `carried-over` epoch shows no burn, because nothing was measured for it. It points at a missed
-`spectrum_parser` run rather than at a real network event. Live operation never produces one: an
-epoch with no measurement simply gets no record.
+The rich list is kept in a single collection. Parsing a file replaces it, but only if the file is at
+least as recent as the latest record, so older files can be parsed at any time to fill in the
+history without touching the current rich list. The new rich list is written to a staging
+collection and renamed over the live one, so the API never sees a partial list.
 
-`timestampSource` is `tick` when the boundary was read from the first tick carrying tick data in the
-following epoch, and `first-observed` when it falls back to when the spectrum file was parsed, which
-runs shortly after the transition.
-
-#### Backfilling the supply history
-
-The supply history before this feature existed can be reconstructed from the `general_data`
-collection, which kept the burned QUs and the epoch of every scrape. The backfill inverts
-`burnedQUs = epoch * 1e12 - circulatingSupply`, joins the spectrum measurements in by timestamp and
-writes the epochs that have no record yet. Records that already exist are never modified, so the
-command is safe to re-run.
-
-The supply an epoch `A` ran on was measured at the end of `A-1`, so what the general data of epoch
-`A` reconstructs is recorded under epoch `A-1`.
+Filling in the history is a matter of parsing every available spectrum file, in any order:
 
 ```bash
-processor/qubic-stats-processor --app-mode=backfill_epoch_stats --mongo-username user --mongo-password pass
+for file in spectrum.*; do
+  processor/qubic-stats-processor --mongo-username user --mongo-password pass --app-mode=spectrum_parser --spectrum-parser-spectrum-file="$file"
+done
 ```
-
-It prints the reconstructed range and warns about epochs with no general data, epochs whose supply is
-carried over, and epochs where the spectrum measurement disagrees with the derived supply. Check that
-output before applying any retention to `general_data`: that collection is the only place the
-historical supply exists.
 
 #### Configuration:
 ```bash
@@ -106,7 +89,6 @@ historical supply exists.
 --mongo-port/$QUBIC_STATS_PROCESSOR_MONGO_PORT                                                  <string>    (default: 27017)
 --mongo-options/$QUBIC_STATS_PROCESSOR_MONGO_OPTIONS                                            <string>    
 --mongo-database/$QUBIC_STATS_PROCESSOR_MONGO_DATABASE                                          <string>    (default: qubic_frontend)
---mongo-spectrum-collection/$QUBIC_STATS_PROCESSOR_MONGO_SPECTRUM_COLLECTION                    <string>    (default: spectrum_data)
 --mongo-data-collection/$QUBIC_STATS_PROCESSOR_MONGO_DATA_COLLECTION                            <string>    (default: general_data)
 --mongo-rich-list-collection/$QUBIC_STATS_PROCESSOR_MONGO_RICH_LIST_COLLECTION                  <string>    (default: rich_list)
 --mongo-epoch-stats-collection/$QUBIC_STATS_PROCESSOR_MONGO_EPOCH_STATS_COLLECTION              <string>    (default: epoch_stats)
@@ -125,7 +107,6 @@ The API is responsible for exposing the stored information.
 --service-http-address/$QUBIC_STATS_API_SERVICE_HTTP_ADDRESS                                    <string>    (default: 0.0.0.0:8080)
 --service-grpc-address/$QUBIC_STATS_API_SERVICE_GRPC_ADDRESS                                    <string>    (default: 0.0.0.0:8081)
 --service-cache-validity-duration/$QUBIC_STATS_API_SERVICE_CACHE_VALIDITY_DURATION              <duration>  (default: 10s)
---service-spectrum-data-update-interval/$QUBIC_STATS_API_SERVICE_SPECTRUM_DATA_UPDATE_INTERVAL  <duration>  (default: 24h)
 --service-rich-list-page-size/$QUBIC_STATS_API_SERVICE_RICH_LIST_PAGE_SIZE                      <int>       (default: 100)
 --service-cache-update-timeout/$QUBIC_STATS_API_SERVICE_CACHE_UPDATE_TIMEOUT                    <duration>  (default: 30s)
 --service-rich-list-limit/$QUBIC_STATS_API_SERVICE_RICH_LIST_LIMIT                              <int>       (default: 10000)
@@ -135,7 +116,6 @@ The API is responsible for exposing the stored information.
 --mongo-port/$QUBIC_STATS_API_MONGO_PORT                                                        <string>    (default: 27017)
 --mongo-options/$QUBIC_STATS_API_MONGO_OPTIONS                                                  <string>    
 --mongo-database/$QUBIC_STATS_API_MONGO_DATABASE                                                <string>    (default: qubic_frontend)
---mongo-spectrum-collection/$QUBIC_STATS_API_MONGO_SPECTRUM_COLLECTION                          <string>    (default: spectrum_data)
 --mongo-data-collection/$QUBIC_STATS_API_MONGO_DATA_COLLECTION                                  <string>    (default: general_data)
 --mongo-rich-list-collection/$QUBIC_STATS_API_MONGO_RICH_LIST_COLLECTION                        <string>    (default: rich_list)
 --mongo-epoch-stats-collection/$QUBIC_STATS_API_MONGO_EPOCH_STATS_COLLECTION                    <string>    (default: epoch_stats)
@@ -182,44 +162,42 @@ curl http://127.0.0.1:8080/v1/latest-stats
 }
 ```
 
-##### /v1/stats/supply-history
+##### /v1/supply-history
 Provides the circulating supply per epoch, one point per completed epoch, ordered by epoch ascending.
-Each point is the supply at the end of that epoch. The epoch in progress is reported separately as
-`currentEpoch` / `currentCirculatingSupply`.
+Each point is the supply at the end of that epoch, and its `timestamp` is when the epoch ended. The
+epoch in progress is reported separately as `currentEpoch` / `currentCirculatingSupply`.
 
 All parameters are optional: `fromEpoch` and `toEpoch` are inclusive and default to the earliest and
 the latest available epoch, `limit` caps the number of points and keeps the most recent ones.
 
 ```shell
-curl "http://127.0.0.1:8080/v1/stats/supply-history?fromEpoch=179&toEpoch=180"
+curl "http://127.0.0.1:8080/v1/supply-history?fromEpoch=230&toEpoch=231"
 ```
 
 ```json
 {
   "supplyCap": "1000000000000000",
-  "currentEpoch": 180,
+  "currentEpoch": 232,
   "currentCirculatingSupply": "149832400000000",
   "points": [
     {
-      "epoch": 179,
+      "epoch": 230,
       "circulatingSupply": "149218900000000",
-      "totalEmitted": "179000000000000",
-      "timestamp": "1753862400",
-      "supplySource": "spectrum"
+      "totalEmitted": "230000000000000",
+      "timestamp": "1789560000"
     },
     {
-      "epoch": 180,
+      "epoch": 231,
       "circulatingSupply": "149832400000000",
-      "totalEmitted": "180000000000000",
-      "timestamp": "1754467200",
-      "supplySource": "spectrum"
+      "totalEmitted": "231000000000000",
+      "timestamp": "1790164800"
     }
   ]
 }
 ```
 
-`currentCirculatingSupply` is read from the same place `/v1/latest-stats` reads it, so the two
-endpoints cannot disagree. See the processor section for what `supplySource` means.
+`currentCirculatingSupply` is the supply of the latest point, read from the same place
+`/v1/latest-stats` reads it, so the two endpoints cannot disagree.
 
 ##### /v1/epochs/{epoch}/rich-list
 

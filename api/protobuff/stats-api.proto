@@ -92,12 +92,8 @@ message SupplyHistoryPoint {
   int64 circulating_supply = 2;
   // Cumulative issuance up to and including this epoch.
   int64 total_emitted = 3;
-  // When this epoch closed, in unix seconds. Display only.
+  // When this epoch ended, in unix seconds. Epochs change every Wednesday at 12:00 UTC.
   int64 timestamp = 4;
-  // How the supply of this point was obtained. "spectrum" and "derived" are measured values,
-  // "carried-over" means that no spectrum file could be attributed to this epoch and the supply of
-  // an earlier one is repeated, which shows up as an epoch without any burn.
-  string supply_source = 5;
 }
 
 message GetSupplyHistoryRequest {

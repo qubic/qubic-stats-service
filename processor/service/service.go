@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,8 +13,9 @@ import (
 	queryProto "github.com/qubic/archive-query-service/legacy/protobuf"
 	liveProto "github.com/qubic/qubic-http/protobuff"
 	"github.com/qubic/qubic-stats-processor/epochstats"
-	"github.com/qubic/qubic-stats-processor/spectrum"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,15 +26,8 @@ const (
 	tickQualityWindowSize = 10000
 	// tickListPageSize is the maximum page size accepted by the query service tick list endpoint.
 	tickListPageSize = 1000
-	// epochStartProbePageSize is how many of the first ticks of an epoch are asked for at a time while
-	// looking for one that carries tick data. The page size must be a multiple of ten.
-	epochStartProbePageSize = 100
-	// epochStartProbePages bounds that search. An epoch that opens with more empty ticks than this
-	// falls back to an estimated start timestamp.
-	epochStartProbePages = 10
-	// millisecondsPerSecond converts the tick timestamps of the query service, which are in
-	// milliseconds, to the unix seconds the stats are kept in.
-	millisecondsPerSecond = 1000
+	// latestDataID is the id of the single general data document, which every scrape overwrites.
+	latestDataID = "latest"
 )
 
 type Service struct {
@@ -42,17 +37,15 @@ type Service struct {
 
 	MongoClient               *mongo.Client
 	MongoDatabase             string
-	MongoSpectrumCollection   string
 	MongoQubicDataCollection  string
 	MongoEpochStatsCollection string
 
 	ScrapeInterval time.Duration
 	ScrapeTimeout  time.Duration
 
-	spectrumData *spectrum.Data // we keep this here for caching purposes
-	// epochStartTimestamps caches the resolved start of every epoch seen since startup. An epoch
-	// boundary never moves, so it only has to be looked up once.
-	epochStartTimestamps map[uint32]int64
+	// latestEpochStats is the record of the most recent completed epoch, kept in case the database
+	// cannot be read on a later scrape.
+	latestEpochStats *epochstats.Record
 }
 
 type Data struct {
@@ -64,7 +57,6 @@ type Data struct {
 	TicksInCurrentEpoch      uint32
 	EmptyTicksInCurrentEpoch uint32
 	EpochTickQuality         float32
-	BurnedQUs                uint64
 	TicksInLast10000         uint32
 	EmptyTicksInLast10000    uint32
 	Last10000TickQuality     float32
@@ -96,7 +88,6 @@ func (s *Service) RunService() error {
 		fmt.Printf("    Ticks this Epoch: %d\n", data.TicksInCurrentEpoch)
 		fmt.Printf("    Empty Ticks this Epoch: %d\n", data.EmptyTicksInCurrentEpoch)
 		fmt.Printf("    Tick Quality: %f\n", data.EpochTickQuality)
-		fmt.Printf("    Burned QUs: %d\n", data.BurnedQUs)
 		fmt.Printf("    Ticks in last %d: %d\n", tickQualityWindowSize, data.TicksInLast10000)
 		fmt.Printf("    Empty Ticks in last %d: %d\n", tickQualityWindowSize, data.EmptyTicksInLast10000)
 		fmt.Printf("    Last %d Tick Quality: %f\n", tickQualityWindowSize, data.Last10000TickQuality)
@@ -105,10 +96,6 @@ func (s *Service) RunService() error {
 		err = s.saveData(data)
 		if err != nil {
 			log.Printf("Failed to save the data. Error: %v", err)
-		}
-		err = s.saveEpochStats(data)
-		if err != nil {
-			log.Printf("Failed to save the epoch stats. Error: %v", err)
 		}
 		println("Done saving.")
 	}
@@ -150,18 +137,12 @@ func (s *Service) scrapeData() (Data, error) {
 		return Data{}, fmt.Errorf("fetching qubic price from coingecko: %w", err)
 	}
 
-	spectrumData, err := spectrum.LoadSpectrumDataFromDatabase(ctx, s.MongoClient, s.MongoDatabase, s.MongoSpectrumCollection)
+	epochStats, err := s.loadLatestEpochStats(ctx)
 	if err != nil {
-		if s.spectrumData == nil {
-			return Data{}, fmt.Errorf("fetching initial spectrum data from database: %w", err)
-		}
-		log.Printf("Failed to update spectrum data, keeping the cached measurement: %v", err)
-		spectrumData = s.spectrumData
-	} else {
-		s.spectrumData = spectrumData
+		return Data{}, err
 	}
 
-	marketCap := int64(float64(price) * float64(spectrumData.CirculatingSupply))
+	marketCap := int64(float64(price) * float64(epochStats.CirculatingSupply))
 
 	archiverStatus, err := fetchQueryServiceStatus(ctx, queryServiceClient)
 	if err != nil {
@@ -169,13 +150,6 @@ func (s *Service) scrapeData() (Data, error) {
 	}
 
 	epoch := archiverStatus.LastProcessedTick.Epoch
-
-	s.cacheEpochStartTimestamp(ctx, queryServiceClient, epoch)
-	// A spectrum file that turned up late belongs to an earlier transition, whose boundary still has
-	// to be resolved to timestamp its record.
-	if spectrumData.Epoch != 0 && spectrumData.Epoch != epoch {
-		s.cacheEpochStartTimestamp(ctx, queryServiceClient, spectrumData.Epoch)
-	}
 
 	latestTick, err := fetchLiveServiceNetworkTick(ctx, liveServiceClient)
 	if err != nil {
@@ -186,8 +160,6 @@ func (s *Service) scrapeData() (Data, error) {
 	if err != nil {
 		return Data{}, fmt.Errorf("fetching query service tick count for epoch %d: %w", epoch, err)
 	}
-
-	burnedQUs := (uint64(epoch) * uint64(1000000000000)) - uint64(spectrumData.CirculatingSupply)
 
 	emptyTickCount, err := fetchQueryServiceEpochEmptyTickCount(ctx, queryServiceClient, epoch)
 	if err != nil {
@@ -208,7 +180,6 @@ func (s *Service) scrapeData() (Data, error) {
 		TicksInCurrentEpoch:      uint32(ticksThisEpoch), // the code originally uses uint32 here
 		EmptyTicksInCurrentEpoch: uint32(emptyTickCount), // I am not currently sure of the implications related to changing the data type to normal int
 		EpochTickQuality:         calculateTickQuality(uint32(ticksThisEpoch), uint32(emptyTickCount)),
-		BurnedQUs:                burnedQUs,
 		TicksInLast10000:         qualityWindow.TickCount,
 		EmptyTicksInLast10000:    qualityWindow.EmptyTickCount,
 		Last10000TickQuality:     calculateTickQuality(qualityWindow.TickCount, qualityWindow.EmptyTickCount),
@@ -217,142 +188,39 @@ func (s *Service) scrapeData() (Data, error) {
 	return serviceData, nil
 }
 
-// saveEpochStats writes the supply history record that the latest spectrum measurement stands for.
-//
-// A spectrum file named for epoch N holds the end state of epoch N-1, so the record is always for a
-// completed epoch. The epoch in progress gets no record until its own file has been parsed, which
-// keeps every record an actual measurement rather than an estimate.
-//
-// It runs on every scrape rather than once at the epoch transition, so that it does not matter how
-// long after the transition the spectrum file turns up, and a restart cannot skip an epoch.
-func (s *Service) saveEpochStats(data Data) error {
+// loadLatestEpochStats returns the record of the most recent completed epoch, which the supply
+// related figures are based on. Should the database not be readable, the record loaded before is
+// used. Without any record there is nothing to base them on, which fails the scrape.
+func (s *Service) loadLatestEpochStats(ctx context.Context) (epochstats.Record, error) {
 
-	spectrumData := s.spectrumData
-	if spectrumData == nil {
-		return nil // nothing has been measured yet
+	record, found, err := epochstats.LoadLatest(ctx, s.MongoClient, s.MongoDatabase, s.MongoEpochStatsCollection)
+	if err == nil && !found {
+		err = errors.New("no epoch stats record yet, a spectrum file has to be parsed first")
 	}
-
-	measuredEpoch, ok := epochstats.MeasuredEpoch(spectrumData.Epoch)
-	if !ok {
-		// Spectrum data written before it carried its epoch cannot be attributed. The next spectrum
-		// parse fills this in.
-		return nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.ScrapeTimeout)
-	defer cancel()
-
-	record := epochstats.Record{
-		Epoch:             measuredEpoch,
-		CirculatingSupply: spectrumData.CirculatingSupply,
-		TotalEmitted:      epochstats.TotalEmitted(measuredEpoch),
-		ActiveAddresses:   spectrumData.ActiveAddresses,
-		SpectrumTimestamp: spectrumData.Timestamp,
-		SupplySource:      epochstats.SupplySourceSpectrum,
-		UpdatedAt:         data.Timestamp,
-	}
-
-	// The measured epoch closed where the spectrum file's own epoch began.
-	if timestamp, found := s.epochStartTimestamps[spectrumData.Epoch]; found {
-		record.EpochEndTimestamp = timestamp
-		record.TimestampSource = epochstats.TimestampSourceTick
-	} else {
-		// The parse runs shortly after the transition, so it is the closer estimate of the boundary.
-		record.EpochEndTimestamp = spectrumData.Timestamp
-		record.TimestampSource = epochstats.TimestampSourceFirstObserved
-	}
-
-	return epochstats.Upsert(ctx, s.MongoClient, s.MongoDatabase, s.MongoEpochStatsCollection, record)
-}
-
-// cacheEpochStartTimestamp resolves the start of an epoch once and remembers it. Failing to resolve
-// it is not fatal: the record falls back to an estimate and the lookup is retried on the next scrape.
-func (s *Service) cacheEpochStartTimestamp(ctx context.Context, client epochStartClient, epoch uint32) {
-
-	if _, found := s.epochStartTimestamps[epoch]; found {
-		return
-	}
-
-	timestamp, err := fetchEpochStartTimestamp(ctx, client, epoch)
 	if err != nil {
-		log.Printf("Failed to resolve the start of epoch %d: %v", epoch, err)
-		return
+		if s.latestEpochStats == nil {
+			return epochstats.Record{}, fmt.Errorf("loading latest epoch stats: %w", err)
+		}
+		log.Printf("Failed to update the latest epoch stats, keeping epoch %d: %v", s.latestEpochStats.Epoch, err)
+		return *s.latestEpochStats, nil
 	}
 
-	if s.epochStartTimestamps == nil {
-		s.epochStartTimestamps = make(map[uint32]int64)
-	}
-	s.epochStartTimestamps[epoch] = timestamp
+	s.latestEpochStats = &record
+	return record, nil
 }
 
-// epochStartClient is the subset of queryProto.TransactionsServiceClient that is needed to find out
-// when an epoch started.
-type epochStartClient interface {
-	GetEpochTickListV2(ctx context.Context, in *queryProto.GetEpochTickListRequestV2, opts ...grpc.CallOption) (*queryProto.GetEpochTickListResponseV2, error)
-	GetTickData(ctx context.Context, in *queryProto.GetTickDataRequest, opts ...grpc.CallOption) (*queryProto.GetTickDataResponse, error)
-}
-
-// fetchEpochStartTimestamp returns, in unix seconds, the timestamp of the first tick of an epoch
-// that carries tick data. Empty ticks hold no timestamp, so the opening ticks of the epoch are
-// walked until one with data is found.
-//
-// The query service only serves the tick list of the current and the previous epoch, so this cannot
-// resolve the boundaries of older epochs.
-func fetchEpochStartTimestamp(ctx context.Context, client epochStartClient, epoch uint32) (int64, error) {
-
-	var lastTickDataErr error
-
-	for page := int32(1); page <= epochStartProbePages; page++ {
-
-		response, err := client.GetEpochTickListV2(ctx, &queryProto.GetEpochTickListRequestV2{
-			Epoch:    epoch,
-			Page:     page,
-			PageSize: epochStartProbePageSize,
-			Desc:     false, // the first page holds the oldest ticks
-		})
-		if err != nil {
-			return 0, fmt.Errorf("fetching tick list page %d for epoch %d: %w", page, epoch, err)
-		}
-
-		ticks := response.GetTicks()
-		if len(ticks) == 0 {
-			break
-		}
-
-		for _, tick := range ticks {
-			if tick.GetIsEmpty() {
-				continue
-			}
-
-			tickData, err := client.GetTickData(ctx, &queryProto.GetTickDataRequest{TickNumber: tick.GetTickNumber()})
-			if err != nil {
-				// A single unreadable tick must not give up the whole epoch.
-				lastTickDataErr = fmt.Errorf("fetching data of tick %d: %w", tick.GetTickNumber(), err)
-				continue
-			}
-
-			timestamp := tickData.GetTickData().GetTimestamp()
-			if timestamp == 0 {
-				continue
-			}
-
-			return int64(timestamp / millisecondsPerSecond), nil
-		}
-	}
-
-	if lastTickDataErr != nil {
-		return 0, fmt.Errorf("no readable tick data in the opening ticks of epoch %d: %w", epoch, lastTickDataErr)
-	}
-
-	return 0, fmt.Errorf("no tick with data among the first %d ticks of epoch %d", epochStartProbePageSize*epochStartProbePages, epoch)
-}
-
+// saveData overwrites the single general data document. Only the latest data is ever served.
 func (s *Service) saveData(data Data) error {
 
 	collection := s.MongoClient.Database(s.MongoDatabase).Collection(s.MongoQubicDataCollection)
-	_, err := collection.InsertOne(context.Background(), data)
+	_, err := collection.ReplaceOne(
+		context.Background(),
+		bson.D{{Key: "_id", Value: latestDataID}},
+		data,
+		options.Replace().SetUpsert(true),
+	)
 	if err != nil {
-		return fmt.Errorf("inserting data in collection: %w", err)
+		return fmt.Errorf("saving data in collection: %w", err)
 	}
 
 	return nil
