@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,8 +12,10 @@ import (
 
 	queryProto "github.com/qubic/archive-query-service/legacy/protobuf"
 	liveProto "github.com/qubic/qubic-http/protobuff"
-	"github.com/qubic/qubic-stats-processor/spectrum"
+	"github.com/qubic/qubic-stats-processor/epochstats"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,6 +26,8 @@ const (
 	tickQualityWindowSize = 10000
 	// tickListPageSize is the maximum page size accepted by the query service tick list endpoint.
 	tickListPageSize = 1000
+	// latestDataID is the id of the single general data document, which every scrape overwrites.
+	latestDataID = "latest"
 )
 
 type Service struct {
@@ -30,15 +35,17 @@ type Service struct {
 	QueryServiceGrpcAddress string
 	LiveServiceGrpcAddress  string
 
-	MongoClient              *mongo.Client
-	MongoDatabase            string
-	MongoSpectrumCollection  string
-	MongoQubicDataCollection string
+	MongoClient               *mongo.Client
+	MongoDatabase             string
+	MongoQubicDataCollection  string
+	MongoEpochStatsCollection string
 
 	ScrapeInterval time.Duration
 	ScrapeTimeout  time.Duration
 
-	spectrumData *spectrum.Data // we keep this here for caching purposes
+	// latestEpochStats is the record of the most recent completed epoch, kept in case the database
+	// cannot be read on a later scrape.
+	latestEpochStats *epochstats.Record
 }
 
 type Data struct {
@@ -50,7 +57,6 @@ type Data struct {
 	TicksInCurrentEpoch      uint32
 	EmptyTicksInCurrentEpoch uint32
 	EpochTickQuality         float32
-	BurnedQUs                uint64
 	TicksInLast10000         uint32
 	EmptyTicksInLast10000    uint32
 	Last10000TickQuality     float32
@@ -82,7 +88,6 @@ func (s *Service) RunService() error {
 		fmt.Printf("    Ticks this Epoch: %d\n", data.TicksInCurrentEpoch)
 		fmt.Printf("    Empty Ticks this Epoch: %d\n", data.EmptyTicksInCurrentEpoch)
 		fmt.Printf("    Tick Quality: %f\n", data.EpochTickQuality)
-		fmt.Printf("    Burned QUs: %d\n", data.BurnedQUs)
 		fmt.Printf("    Ticks in last %d: %d\n", tickQualityWindowSize, data.TicksInLast10000)
 		fmt.Printf("    Empty Ticks in last %d: %d\n", tickQualityWindowSize, data.EmptyTicksInLast10000)
 		fmt.Printf("    Last %d Tick Quality: %f\n", tickQualityWindowSize, data.Last10000TickQuality)
@@ -132,15 +137,12 @@ func (s *Service) scrapeData() (Data, error) {
 		return Data{}, fmt.Errorf("fetching qubic price from coingecko: %w", err)
 	}
 
-	spectrumData, err := spectrum.LoadSpectrumDataFromDatabase(ctx, s.MongoClient, s.MongoDatabase, s.MongoSpectrumCollection)
+	epochStats, err := s.loadLatestEpochStats(ctx)
 	if err != nil {
-		if s.spectrumData == nil {
-			return Data{}, fmt.Errorf("fetching initial spectrum data from database: %w", err)
-		}
-		fmt.Printf("Failed to update spectrum data: %v", err)
+		return Data{}, err
 	}
 
-	marketCap := int64(float64(price) * float64(spectrumData.CirculatingSupply))
+	marketCap := int64(float64(price) * float64(epochStats.CirculatingSupply))
 
 	archiverStatus, err := fetchQueryServiceStatus(ctx, queryServiceClient)
 	if err != nil {
@@ -158,8 +160,6 @@ func (s *Service) scrapeData() (Data, error) {
 	if err != nil {
 		return Data{}, fmt.Errorf("fetching query service tick count for epoch %d: %w", epoch, err)
 	}
-
-	burnedQUs := (uint64(epoch) * uint64(1000000000000)) - uint64(spectrumData.CirculatingSupply)
 
 	emptyTickCount, err := fetchQueryServiceEpochEmptyTickCount(ctx, queryServiceClient, epoch)
 	if err != nil {
@@ -180,7 +180,6 @@ func (s *Service) scrapeData() (Data, error) {
 		TicksInCurrentEpoch:      uint32(ticksThisEpoch), // the code originally uses uint32 here
 		EmptyTicksInCurrentEpoch: uint32(emptyTickCount), // I am not currently sure of the implications related to changing the data type to normal int
 		EpochTickQuality:         calculateTickQuality(uint32(ticksThisEpoch), uint32(emptyTickCount)),
-		BurnedQUs:                burnedQUs,
 		TicksInLast10000:         qualityWindow.TickCount,
 		EmptyTicksInLast10000:    qualityWindow.EmptyTickCount,
 		Last10000TickQuality:     calculateTickQuality(qualityWindow.TickCount, qualityWindow.EmptyTickCount),
@@ -189,12 +188,39 @@ func (s *Service) scrapeData() (Data, error) {
 	return serviceData, nil
 }
 
+// loadLatestEpochStats returns the record of the most recent completed epoch, which the supply
+// related figures are based on. Should the database not be readable, the record loaded before is
+// used. Without any record there is nothing to base them on, which fails the scrape.
+func (s *Service) loadLatestEpochStats(ctx context.Context) (epochstats.Record, error) {
+
+	record, found, err := epochstats.LoadLatest(ctx, s.MongoClient, s.MongoDatabase, s.MongoEpochStatsCollection)
+	if err == nil && !found {
+		err = errors.New("no epoch stats record yet, a spectrum file has to be parsed first")
+	}
+	if err != nil {
+		if s.latestEpochStats == nil {
+			return epochstats.Record{}, fmt.Errorf("loading latest epoch stats: %w", err)
+		}
+		log.Printf("Failed to update the latest epoch stats, keeping epoch %d: %v", s.latestEpochStats.Epoch, err)
+		return *s.latestEpochStats, nil
+	}
+
+	s.latestEpochStats = &record
+	return record, nil
+}
+
+// saveData overwrites the single general data document. Only the latest data is ever served.
 func (s *Service) saveData(data Data) error {
 
 	collection := s.MongoClient.Database(s.MongoDatabase).Collection(s.MongoQubicDataCollection)
-	_, err := collection.InsertOne(context.Background(), data)
+	_, err := collection.ReplaceOne(
+		context.Background(),
+		bson.D{{Key: "_id", Value: latestDataID}},
+		data,
+		options.Replace().SetUpsert(true),
+	)
 	if err != nil {
-		return fmt.Errorf("inserting data in collection: %w", err)
+		return fmt.Errorf("saving data in collection: %w", err)
 	}
 
 	return nil

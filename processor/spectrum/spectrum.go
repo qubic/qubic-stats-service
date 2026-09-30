@@ -70,9 +70,7 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 
 	}
 
-	slices.SortFunc(richList, func(a, b RichListEntity) int {
-		return cmp.Compare(a.Balance, b.Balance)
-	})
+	rankRichList(richList)
 
 	println("Done.")
 	fmt.Printf("Circulating supply: %d\n", circulatingSupply)
@@ -86,6 +84,23 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 		},
 		List: richList,
 	}, nil
+}
+
+// rankRichList orders the rich list by balance, highest first, and records each entry's position.
+// Equal balances are broken by identity so that a rank stays the same across re-parses of the same
+// spectrum file. The api pages through the stored rank instead of sorting the collection.
+func rankRichList(richList RichList) {
+
+	slices.SortFunc(richList, func(a, b RichListEntity) int {
+		if c := -cmp.Compare(a.Balance, b.Balance); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Identity, b.Identity)
+	})
+
+	for index := range richList {
+		richList[index].Rank = int32(index)
+	}
 }
 
 func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
@@ -181,66 +196,48 @@ func (d *Data) SaveSpectrumDataToFile(spectrumDataFile string) error {
 
 }
 
-func LoadSpectrumDataFromDatabase(ctx context.Context, dbClient *mongo.Client, database string, spectrumCollection string) (*Data, error) {
-
-	println("Loading spectrum data from database...")
-
-	collection := dbClient.Database(database).Collection(spectrumCollection)
-
-	cursor, err := collection.Find(ctx, bson.D{})
-	if err != nil {
-		return nil, errors.Wrap(err, "getting spectrum data from database")
-	}
-
-	var results []Data
-	var result Data
-	var latestTimestamp int64
-
-	if err = cursor.All(ctx, &results); err != nil {
-		return nil, errors.Wrap(err, "getting spectrum data from cursor")
-	}
-
-	for _, data := range results {
-		if data.Timestamp > latestTimestamp {
-			result = data
-		}
-	}
-
-	println("Done.")
-
-	return &result, nil
-
-}
-
-func (d *Data) SaveSpectrumDataToDatabase(ctx context.Context, dbClient *mongo.Client, database string, spectrumCollection string) error {
-
-	println("Saving spectrum data to database...")
-
-	collection := dbClient.Database(database).Collection(spectrumCollection)
-
-	_, err := collection.InsertOne(ctx, d)
-	if err != nil {
-		return errors.Wrap(err, "saving spectrum data to database")
-	}
-
-	println("Done.")
-
-	return nil
-}
-
-func SaveRichListToDatabase(ctx context.Context, dbClient *mongo.Client, database string, richListCollection string, richList RichList) error {
+// ReplaceRichList swaps the stored rich list for the given one.
+//
+// The new list is written to a staging collection and indexed first, then renamed over the live
+// collection in a single step, so the api never sees a missing or half written rich list.
+func ReplaceRichList(ctx context.Context, dbClient *mongo.Client, database string, richListCollection string, richList RichList) error {
 	println("Saving rich list to database...")
 
-	collection := dbClient.Database(database).Collection(richListCollection)
+	stagingCollectionName := richListCollection + "_staging"
+	staging := dbClient.Database(database).Collection(stagingCollectionName)
+
+	// A parse that failed half way may have left a staging collection behind.
+	err := staging.Drop(ctx)
+	if err != nil {
+		return errors.Wrap(err, "dropping leftover rich list staging collection")
+	}
 
 	list := make([]interface{}, len(richList))
 	for index, value := range richList {
 		list[index] = value
 	}
 
-	_, err := collection.InsertMany(ctx, list)
+	_, err = staging.InsertMany(ctx, list)
 	if err != nil {
-		return errors.Wrap(err, "saving rich list to database")
+		return errors.Wrap(err, "saving rich list to staging collection")
+	}
+
+	// Built after the insert, which is cheaper than maintaining it while writing half a million
+	// entries. The api pages through the list by rank.
+	_, err = staging.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "rank", Value: 1}},
+	})
+	if err != nil {
+		return errors.Wrap(err, "creating rich list rank index")
+	}
+
+	err = dbClient.Database("admin").RunCommand(ctx, bson.D{
+		{Key: "renameCollection", Value: database + "." + stagingCollectionName},
+		{Key: "to", Value: database + "." + richListCollection},
+		{Key: "dropTarget", Value: true},
+	}).Err()
+	if err != nil {
+		return errors.Wrap(err, "renaming rich list staging collection")
 	}
 
 	println("Done.")
