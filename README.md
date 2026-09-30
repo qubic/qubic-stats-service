@@ -1,5 +1,12 @@
 # The Qubic Stats Service
 
+> [!WARNING]
+> This version is not compatible with the data written by v0.7.0 and earlier. The circulating supply,
+> the rich list and the latest stats are stored differently, so the spectrum files have to be parsed
+> again (see [Supply history](#supply-history)) before the service and the API are started. The
+> `spectrum_data` and `rich_list_<epoch>` collections and the old `general_data` documents are no
+> longer used.
+
 The stats service's purpose is to calculate, save and expose general data related to Qubic.
 
 Currently, the service stores the following data:
