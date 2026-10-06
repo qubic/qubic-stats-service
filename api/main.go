@@ -30,13 +30,12 @@ func main() {
 func run() error {
 	var config struct {
 		Service struct {
-			HttpAddress                string        `conf:"default:0.0.0.0:8080"`
-			GrpcAddress                string        `conf:"default:0.0.0.0:8081"`
-			CacheValidityDuration      time.Duration `conf:"default:10s"`
-			SpectrumDataUpdateInterval time.Duration `conf:"default:24h"`
-			RichListPageSize           int32         `conf:"default:100"`
-			CacheUpdateTimeout         time.Duration `conf:"default:30s"`
-			RichListLimit              int           `conf:"default:10000"`
+			HttpAddress           string        `conf:"default:0.0.0.0:8080"`
+			GrpcAddress           string        `conf:"default:0.0.0.0:8081"`
+			CacheValidityDuration time.Duration `conf:"default:10s"`
+			RichListPageSize      int32         `conf:"default:100"`
+			CacheUpdateTimeout    time.Duration `conf:"default:30s"`
+			RichListLimit         int           `conf:"default:10000"`
 		}
 		Mongo struct {
 			Username string `conf:"default:user"`
@@ -45,11 +44,11 @@ func run() error {
 			Port     string `conf:"default:27017"`
 			Options  string
 
-			Database           string        `conf:"default:qubic_frontend"`
-			SpectrumCollection string        `conf:"default:spectrum_data"`
-			DataCollection     string        `conf:"default:general_data"`
-			RichListCollection string        `conf:"default:rich_list"`
-			Timeout            time.Duration `conf:"default:15s"`
+			Database             string        `conf:"default:qubic_frontend"`
+			DataCollection       string        `conf:"default:general_data"`
+			RichListCollection   string        `conf:"default:rich_list"`
+			EpochStatsCollection string        `conf:"default:epoch_stats"`
+			Timeout              time.Duration `conf:"default:15s"`
 		}
 		Pool struct {
 			NodeFetcherUrl     string        `conf:"default:http://127.0.0.1:8080/status"`
@@ -114,13 +113,12 @@ func run() error {
 	}()
 
 	serviceConfiguration := cache.ServiceConfiguration{
-		MongoDatabase:            config.Mongo.Database,
-		MongoSpectrumCollection:  config.Mongo.SpectrumCollection,
-		MongoQubicDataCollection: config.Mongo.DataCollection,
-		MongoRichListCollection:  config.Mongo.RichListCollection,
+		MongoDatabase:             config.Mongo.Database,
+		MongoQubicDataCollection:  config.Mongo.DataCollection,
+		MongoRichListCollection:   config.Mongo.RichListCollection,
+		MongoEpochStatsCollection: config.Mongo.EpochStatsCollection,
 
-		CacheValidityDuration:    config.Service.CacheValidityDuration,
-		SpectrumValidityDuration: config.Service.SpectrumDataUpdateInterval,
+		CacheValidityDuration: config.Service.CacheValidityDuration,
 
 		RichListPageSize: config.Service.RichListPageSize,
 

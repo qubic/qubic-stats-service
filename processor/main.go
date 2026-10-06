@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ardanlabs/conf"
 	"github.com/pkg/errors"
+	"github.com/qubic/qubic-stats-processor/epochstats"
 	"github.com/qubic/qubic-stats-processor/service"
 	"github.com/qubic/qubic-stats-processor/spectrum"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -43,10 +44,10 @@ type Configuration struct {
 		Port     string `conf:"default:27017"`
 		Options  string
 
-		Database           string `conf:"default:qubic_frontend"`
-		SpectrumCollection string `conf:"default:spectrum_data"`
-		DataCollection     string `conf:"default:general_data"`
-		RichListCollection string `conf:"default:rich_list"`
+		Database             string `conf:"default:qubic_frontend"`
+		DataCollection       string `conf:"default:general_data"`
+		RichListCollection   string `conf:"default:rich_list"`
+		EpochStatsCollection string `conf:"default:epoch_stats"`
 	}
 }
 
@@ -144,10 +145,10 @@ func run() error {
 			QueryServiceGrpcAddress: config.Service.QueryServiceGrpcAddress,
 			LiveServiceGrpcAddress:  config.Service.LiveServiceGrpcAddress,
 
-			MongoClient:              client,
-			MongoDatabase:            config.Mongo.Database,
-			MongoSpectrumCollection:  config.Mongo.SpectrumCollection,
-			MongoQubicDataCollection: config.Mongo.DataCollection,
+			MongoClient:               client,
+			MongoDatabase:             config.Mongo.Database,
+			MongoQubicDataCollection:  config.Mongo.DataCollection,
+			MongoEpochStatsCollection: config.Mongo.EpochStatsCollection,
 
 			ScrapeInterval: config.Service.DataScrapeInterval,
 			ScrapeTimeout:  config.Service.DataScrapeTimeout,
@@ -190,13 +191,15 @@ func run() error {
 			break
 		}
 
-		epoch := ""
-
-		split := strings.Split(config.SpectrumParser.SpectrumFile, ".")
-		if len(split) < 2 {
-			return errors.New("cannot parse file extension into epoch")
+		spectrumEpoch, err := parseEpochFromFileName(config.SpectrumParser.SpectrumFile)
+		if err != nil {
+			return errors.Wrap(err, "reading epoch from spectrum file name")
 		}
-		epoch = split[len(split)-1]
+
+		record, err := epochstats.NewRecord(spectrumEpoch, results.Data.CirculatingSupply, results.Data.ActiveAddresses)
+		if err != nil {
+			return errors.Wrap(err, "building epoch stats record")
+		}
 
 		mongoConnection := MongoConfiguration{
 			Username:          config.Mongo.Username,
@@ -218,44 +221,63 @@ func run() error {
 			}
 		}()
 
-		err = results.Data.SaveSpectrumDataToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
+		err = saveSpectrumResults(context.Background(), client, &config, record, results.List)
 		if err != nil {
-			return errors.Wrap(err, "saving spectrum data")
+			return err
 		}
 
-		err = purgeOldEpochCollections(client, config.Mongo.Database, config.Mongo.RichListCollection)
-		if err != nil {
-			return fmt.Errorf("purging old epoch rich lists: %w", err)
-		}
-
-		err = spectrum.SaveRichListToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.RichListCollection+"_"+epoch, results.List)
-
-		latestData, err := spectrum.LoadSpectrumDataFromDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
-
-		fmt.Printf("Latest data read from db: Circ supply: %d, Active addr: %d Update timestamp: %d\n", latestData.CirculatingSupply, latestData.ActiveAddresses, latestData.Timestamp)
 		break
 	}
 
 	return nil
 }
 
-func purgeOldEpochCollections(mongoClient *mongo.Client, database string, spectrumCollectionBase string) error {
+// parseEpochFromFileName reads the epoch from the extension of a spectrum file, as in
+// "spectrum.119".
+func parseEpochFromFileName(fileName string) (uint32, error) {
 
-	db := mongoClient.Database(database)
-	collections, err := db.ListCollectionNames(context.Background(), bson.D{})
+	index := strings.LastIndex(fileName, ".")
+	if index < 0 || index == len(fileName)-1 {
+		return 0, errors.Errorf("no epoch extension in file name [%s]", fileName)
+	}
+
+	epoch, err := strconv.ParseUint(fileName[index+1:], 10, 32)
 	if err != nil {
-		return fmt.Errorf("getting list of mongo collection names: %w", err)
+		return 0, errors.Wrapf(err, "parsing epoch from file name [%s]", fileName)
 	}
 
-	for _, c := range collections {
-		if strings.Contains(c, spectrumCollectionBase) {
-			err := db.Collection(c).Drop(context.Background())
-			if err != nil {
-				return fmt.Errorf("dropping collection %s: %w", c, err)
-			}
-			fmt.Printf("Dropped epoch rich list collection: %s\n", c)
-		}
+	return uint32(epoch), nil
+}
+
+// saveSpectrumResults stores what a spectrum file measured. The epoch record is always written, so
+// that older spectrum files can be parsed to fill in the supply history. The rich list is only
+// replaced when the file is at least as recent as every other one parsed so far.
+func saveSpectrumResults(ctx context.Context, client *mongo.Client, config *Configuration, record epochstats.Record, richList spectrum.RichList) error {
+
+	latest, found, err := epochstats.LoadLatest(ctx, client, config.Mongo.Database, config.Mongo.EpochStatsCollection)
+	if err != nil {
+		return errors.Wrap(err, "loading latest epoch stats record")
 	}
+
+	// The rich list is replaced before the record is written, so that the rich list is already in
+	// place once the record makes the api report the new epoch.
+	if !found || record.Epoch >= latest.Epoch {
+		err = spectrum.ReplaceRichList(ctx, client, config.Mongo.Database, config.Mongo.RichListCollection, richList)
+		if err != nil {
+			return errors.Wrap(err, "replacing rich list")
+		}
+	} else {
+		fmt.Printf("Epoch %d is older than the latest stored epoch %d. Keeping the current rich list.\n", record.Epoch, latest.Epoch)
+	}
+
+	err = epochstats.Save(ctx, client, config.Mongo.Database, config.Mongo.EpochStatsCollection, record)
+	if err != nil {
+		return errors.Wrap(err, "saving epoch stats record")
+	}
+
+	fmt.Printf("Saved epoch %d: Circ supply: %d, Total emitted: %d, Active addr: %d, Epoch end: %d\n",
+		record.Epoch, record.CirculatingSupply, record.TotalEmitted, record.ActiveAddresses, record.EpochEndTimestamp)
+
 	return nil
 }
 
