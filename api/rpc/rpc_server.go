@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math"
 	"net"
@@ -9,7 +10,6 @@ import (
 	"regexp"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/pkg/errors"
 	"github.com/qubic/go-node-connector/types"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
@@ -148,12 +148,12 @@ func queryRichListByRank(ctx context.Context, collection *mongo.Collection, star
 
 	cursor, err := collection.Find(ctx, filter, findOptions)
 	if err != nil {
-		return nil, errors.Wrap(err, "querying rich list by rank")
+		return nil, fmt.Errorf("querying rich list by rank: %w", err)
 	}
 
 	var results cache.RichList
 	if err := cursor.All(ctx, &results); err != nil {
-		return nil, errors.Wrap(err, "decoding rich list")
+		return nil, fmt.Errorf("decoding rich list: %w", err)
 	}
 
 	return results, nil
@@ -280,7 +280,7 @@ func validateIdentity(identityString string) error {
 		return err
 	}
 	if reverse != identity { // checksum errors are not checked in conversion
-		return errors.Errorf("invalid identity [%s]", identityString)
+		return fmt.Errorf("invalid identity [%s]", identityString)
 	}
 	return nil
 }
@@ -289,15 +289,15 @@ func validateIdentity(identityString string) error {
 func getPaginationInformation(totalRecords, pageNumber, pageSize int) (*protobuff.Pagination, error) {
 
 	if pageNumber < 1 {
-		return nil, errors.Errorf("invalid page number [%d]", pageNumber)
+		return nil, fmt.Errorf("invalid page number [%d]", pageNumber)
 	}
 
 	if pageSize < 1 {
-		return nil, errors.Errorf("invalid page size [%d]", pageSize)
+		return nil, fmt.Errorf("invalid page size [%d]", pageSize)
 	}
 
 	if totalRecords < 0 {
-		return nil, errors.Errorf("invalid number of total records [%d]", totalRecords)
+		return nil, fmt.Errorf("invalid number of total records [%d]", totalRecords)
 	}
 
 	totalPages := totalRecords / pageSize // rounds down

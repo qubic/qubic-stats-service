@@ -3,9 +3,8 @@ package spectrum
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
-
-	"github.com/pkg/errors"
 )
 
 type Entity struct {
@@ -30,7 +29,7 @@ func (e *Entity) GetPublicKeyString() string {
 func (e *Entity) GetBalance() (int64, error) {
 	balance := e.incomingAmount - e.outgoingAmount
 	if balance < 0 {
-		return 0, errors.Errorf("Negative balance (%d) for %s", balance, e.GetPublicKeyString())
+		return 0, fmt.Errorf("Negative balance (%d) for %s", balance, e.GetPublicKeyString())
 	}
 
 	return balance, nil
@@ -42,34 +41,34 @@ func (e *Entity) UnmarshallFromBinary(r io.Reader) error {
 
 	err := binary.Read(r, byteOrder, &e.publicKey)
 	if err != nil {
-		return errors.Wrap(err, "reading public key")
+		return fmt.Errorf("reading public key: %w", err)
 	}
 
 	err = binary.Read(r, byteOrder, &e.incomingAmount)
 	if err != nil {
-		return errors.Wrap(err, "reading incoming amount")
+		return fmt.Errorf("reading incoming amount: %w", err)
 	}
 	err = binary.Read(r, byteOrder, &e.outgoingAmount)
 	if err != nil {
-		return errors.Wrap(err, "reading outgoing amount")
+		return fmt.Errorf("reading outgoing amount: %w", err)
 	}
 
 	err = binary.Read(r, byteOrder, &e.incomingTransfers)
 	if err != nil {
-		return errors.Wrap(err, "reading incoming transfers")
+		return fmt.Errorf("reading incoming transfers: %w", err)
 	}
 	err = binary.Read(r, byteOrder, &e.outgoingTransfers)
 	if err != nil {
-		return errors.Wrap(err, "reading outgoing transfers")
+		return fmt.Errorf("reading outgoing transfers: %w", err)
 	}
 
 	err = binary.Read(r, byteOrder, &e.latestIncomingTick)
 	if err != nil {
-		return errors.Wrap(err, "reading latest incoming tick")
+		return fmt.Errorf("reading latest incoming tick: %w", err)
 	}
 	err = binary.Read(r, byteOrder, &e.latestOutgoingTick)
 	if err != nil {
-		return errors.Wrap(err, "reading latest outgoing tick")
+		return fmt.Errorf("reading latest outgoing tick: %w", err)
 	}
 
 	return nil

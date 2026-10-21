@@ -2,11 +2,10 @@ package cache
 
 import (
 	"context"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -96,7 +95,7 @@ func (s *Service) updateCache() error {
 
 	qubicData, err := s.fetchQubicData(ctx)
 	if err != nil {
-		errs = append(errs, errors.Wrap(err, "fetching qubic data"))
+		errs = append(errs, fmt.Errorf("fetching qubic data: %w", err))
 	} else {
 		s.Cache.UpdateQubicData(qubicData)
 	}
@@ -104,12 +103,12 @@ func (s *Service) updateCache() error {
 	// The supply history is small, so it is simply reloaded in full.
 	supplyHistory, err := s.fetchSupplyHistory(ctx)
 	if err != nil {
-		errs = append(errs, errors.Wrap(err, "fetching supply history"))
+		errs = append(errs, fmt.Errorf("fetching supply history: %w", err))
 	} else {
 		s.Cache.UpdateSupplyHistory(supplyHistory)
 	}
 
-	return stderrors.Join(errs...)
+	return errors.Join(errs...)
 }
 
 // fetchSupplyHistory loads every epoch stats record, oldest epoch first. An empty collection is not
@@ -121,12 +120,12 @@ func (s *Service) fetchSupplyHistory(ctx context.Context) (SupplyHistory, error)
 
 	cursor, err := collection.Find(ctx, bson.D{}, opts)
 	if err != nil {
-		return nil, errors.Wrap(err, "querying epoch stats")
+		return nil, fmt.Errorf("querying epoch stats: %w", err)
 	}
 
 	var supplyHistory SupplyHistory
 	if err := cursor.All(ctx, &supplyHistory); err != nil {
-		return nil, errors.Wrap(err, "decoding epoch stats")
+		return nil, fmt.Errorf("decoding epoch stats: %w", err)
 	}
 
 	return supplyHistory, nil
@@ -141,7 +140,7 @@ func (s *Service) fetchQubicData(ctx context.Context) (QubicData, error) {
 	result := collection.FindOne(ctx, bson.D{{Key: "_id", Value: latestQubicDataID}})
 	err := result.Decode(&qubicData)
 	if err != nil {
-		return QubicData{}, errors.Wrap(err, "decoding database response")
+		return QubicData{}, fmt.Errorf("decoding database response: %w", err)
 	}
 
 	return qubicData, nil
