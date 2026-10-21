@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf"
-	"github.com/pkg/errors"
 	"github.com/qubic/qubic-stats-processor/epochstats"
 	"github.com/qubic/qubic-stats-processor/service"
 	"github.com/qubic/qubic-stats-processor/spectrum"
@@ -91,29 +91,29 @@ func run() error {
 		case conf.ErrHelpWanted:
 			usage, err := conf.Usage(prefix, &config)
 			if err != nil {
-				return errors.Wrap(err, "generating config usage")
+				return fmt.Errorf("generating config usage: %w", err)
 			}
 			fmt.Println(usage)
 			return nil
 		case conf.ErrVersionWanted:
 			version, err := conf.VersionString(prefix, &config)
 			if err != nil {
-				return errors.Wrap(err, "generating config version")
+				return fmt.Errorf("generating config version: %w", err)
 			}
 			fmt.Println(version)
 			return nil
 		}
-		return errors.Wrap(err, "parsing config")
+		return fmt.Errorf("parsing config: %w", err)
 	}
 	out, err := conf.String(&config)
 	if err != nil {
-		return errors.Wrap(err, "generating config for output")
+		return fmt.Errorf("generating config for output: %w", err)
 	}
 	log.Printf("main: Config :\n%v\n", out)
 
 	err = validateConfig(&config)
 	if err != nil {
-		return errors.Wrap(err, "failed to validate configuration")
+		return fmt.Errorf("failed to validate configuration: %w", err)
 	}
 
 	switch config.App.Mode {
@@ -131,7 +131,7 @@ func run() error {
 		println("Connecting to database...")
 		client, err := createMongoClient(&mongoConnection)
 		if err != nil {
-			return errors.Wrap(err, "connecting to database")
+			return fmt.Errorf("connecting to database: %w", err)
 		}
 
 		defer func() {
@@ -156,7 +156,7 @@ func run() error {
 
 		err = s.RunService()
 		if err != nil {
-			return errors.Wrap(err, "running the web service")
+			return fmt.Errorf("running the web service: %w", err)
 		}
 
 		break
@@ -168,7 +168,7 @@ func run() error {
 
 		s, err := spectrum.ReadSpectrumFromFile(config.SpectrumParser.SpectrumFile)
 		if err != nil {
-			return errors.Wrap(err, "loading spectrum from file")
+			return fmt.Errorf("loading spectrum from file: %w", err)
 		}
 
 		//elapsed := time.Since(start)
@@ -177,7 +177,7 @@ func run() error {
 
 		results, err := spectrum.CalculateSpectrumData(s)
 		if err != nil {
-			return errors.Wrap(err, "calculating spectrum data")
+			return fmt.Errorf("calculating spectrum data: %w", err)
 		}
 
 		//elapsed = time.Since(start)
@@ -186,19 +186,19 @@ func run() error {
 		if config.SpectrumParser.OutputMode == "file" {
 			err = results.Data.SaveSpectrumDataToFile(config.SpectrumParser.OutputFile)
 			if err != nil {
-				return errors.Wrap(err, "saving spectrum data")
+				return fmt.Errorf("saving spectrum data: %w", err)
 			}
 			break
 		}
 
 		spectrumEpoch, err := parseEpochFromFileName(config.SpectrumParser.SpectrumFile)
 		if err != nil {
-			return errors.Wrap(err, "reading epoch from spectrum file name")
+			return fmt.Errorf("reading epoch from spectrum file name: %w", err)
 		}
 
 		record, err := epochstats.NewRecord(spectrumEpoch, results.Data.CirculatingSupply, results.Data.ActiveAddresses)
 		if err != nil {
-			return errors.Wrap(err, "building epoch stats record")
+			return fmt.Errorf("building epoch stats record: %w", err)
 		}
 
 		mongoConnection := MongoConfiguration{
@@ -212,7 +212,7 @@ func run() error {
 		println("Connecting to database...")
 		client, err := createMongoClient(&mongoConnection)
 		if err != nil {
-			return errors.Wrap(err, "connecting to database")
+			return fmt.Errorf("connecting to database: %w", err)
 		}
 
 		defer func() {
@@ -238,12 +238,12 @@ func parseEpochFromFileName(fileName string) (uint32, error) {
 
 	index := strings.LastIndex(fileName, ".")
 	if index < 0 || index == len(fileName)-1 {
-		return 0, errors.Errorf("no epoch extension in file name [%s]", fileName)
+		return 0, fmt.Errorf("no epoch extension in file name [%s]", fileName)
 	}
 
 	epoch, err := strconv.ParseUint(fileName[index+1:], 10, 32)
 	if err != nil {
-		return 0, errors.Wrapf(err, "parsing epoch from file name [%s]", fileName)
+		return 0, fmt.Errorf("parsing epoch from file name [%s]: %w", fileName, err)
 	}
 
 	return uint32(epoch), nil
@@ -256,7 +256,7 @@ func saveSpectrumResults(ctx context.Context, client *mongo.Client, config *Conf
 
 	latest, found, err := epochstats.LoadLatest(ctx, client, config.Mongo.Database, config.Mongo.EpochStatsCollection)
 	if err != nil {
-		return errors.Wrap(err, "loading latest epoch stats record")
+		return fmt.Errorf("loading latest epoch stats record: %w", err)
 	}
 
 	// The rich list is replaced before the record is written, so that the rich list is already in
@@ -264,7 +264,7 @@ func saveSpectrumResults(ctx context.Context, client *mongo.Client, config *Conf
 	if !found || record.Epoch >= latest.Epoch {
 		err = spectrum.ReplaceRichList(ctx, client, config.Mongo.Database, config.Mongo.RichListCollection, richList)
 		if err != nil {
-			return errors.Wrap(err, "replacing rich list")
+			return fmt.Errorf("replacing rich list: %w", err)
 		}
 	} else {
 		fmt.Printf("Epoch %d is older than the latest stored epoch %d. Keeping the current rich list.\n", record.Epoch, latest.Epoch)
@@ -272,7 +272,7 @@ func saveSpectrumResults(ctx context.Context, client *mongo.Client, config *Conf
 
 	err = epochstats.Save(ctx, client, config.Mongo.Database, config.Mongo.EpochStatsCollection, record)
 	if err != nil {
-		return errors.Wrap(err, "saving epoch stats record")
+		return fmt.Errorf("saving epoch stats record: %w", err)
 	}
 
 	fmt.Printf("Saved epoch %d: Circ supply: %d, Total emitted: %d, Active addr: %d, Epoch end: %d\n",
@@ -300,7 +300,7 @@ func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error)
 	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
 	client, err := mongo.Connect(opts)
 	if err != nil {
-		return nil, errors.Wrap(err, "creating database client")
+		return nil, fmt.Errorf("creating database client: %w", err)
 	}
 
 	return client, nil
