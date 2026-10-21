@@ -10,7 +10,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/qubic/go-node-connector/types"
 	"github.com/schollz/progressbar/v3"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -48,7 +47,7 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 		_ = bar.Add(1)
 		entityBalance, err := entity.GetBalance()
 		if err != nil {
-			return nil, errors.Wrapf(err, "getting balance of entity #%d", index)
+			return nil, fmt.Errorf("getting balance of entity #%d: %w", index, err)
 		}
 		circulatingSupply += entityBalance
 
@@ -58,7 +57,7 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 			var identity types.Identity
 			identity, err := identity.FromPubKey(entity.publicKey, false)
 			if err != nil {
-				return nil, errors.Wrap(err, "getting identity for spectrum entity")
+				return nil, fmt.Errorf("getting identity for spectrum entity: %w", err)
 			}
 
 			richListEntity := RichListEntity{
@@ -109,7 +108,7 @@ func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
 
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, errors.Wrap(err, "reading spectrum file")
+		return nil, fmt.Errorf("reading spectrum file: %w", err)
 	}
 
 	spectrumFileLength := len(fileData)
@@ -136,7 +135,7 @@ func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
 		var entity Entity
 		err := entity.UnmarshallFromBinary(reader)
 		if err != nil {
-			return nil, errors.Wrapf(err, "deserializing %dth spectrum entity", index)
+			return nil, fmt.Errorf("deserializing %dth spectrum entity: %w", index, err)
 		}
 
 		if entity.publicKey != EmptyAddress {
@@ -154,14 +153,14 @@ func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
 
 	data, err := os.ReadFile(spectrumDataFile)
 	if err != nil {
-		return nil, errors.Wrap(err, "loading spectrum data file")
+		return nil, fmt.Errorf("loading spectrum data file: %w", err)
 	}
 
 	var spectrumData Data
 
 	err = json.Unmarshal(data, &spectrumData)
 	if err != nil {
-		return nil, errors.Wrap(err, "unmarshalling spectrum data from json")
+		return nil, fmt.Errorf("unmarshalling spectrum data from json: %w", err)
 	}
 
 	println("Spectrum data loaded.")
@@ -178,18 +177,18 @@ func (d *Data) SaveSpectrumDataToFile(spectrumDataFile string) error {
 
 	data, err := json.Marshal(d)
 	if err != nil {
-		return errors.Wrap(err, "marshalling spectrum data to json")
+		return fmt.Errorf("marshalling spectrum data to json: %w", err)
 	}
 
 	_ = os.Remove(spectrumDataFile) // Ignore error on purpose
 
 	file, err := os.Create(spectrumDataFile)
 	if err != nil {
-		return errors.Wrap(err, "creating spectrum data file")
+		return fmt.Errorf("creating spectrum data file: %w", err)
 	}
 	_, err = file.Write(data)
 	if err != nil {
-		return errors.Wrap(err, "saving to spectrum data file")
+		return fmt.Errorf("saving to spectrum data file: %w", err)
 	}
 
 	return nil
@@ -209,7 +208,7 @@ func ReplaceRichList(ctx context.Context, dbClient *mongo.Client, database strin
 	// A parse that failed half way may have left a staging collection behind.
 	err := staging.Drop(ctx)
 	if err != nil {
-		return errors.Wrap(err, "dropping leftover rich list staging collection")
+		return fmt.Errorf("dropping leftover rich list staging collection: %w", err)
 	}
 
 	list := make([]interface{}, len(richList))
@@ -219,7 +218,7 @@ func ReplaceRichList(ctx context.Context, dbClient *mongo.Client, database strin
 
 	_, err = staging.InsertMany(ctx, list)
 	if err != nil {
-		return errors.Wrap(err, "saving rich list to staging collection")
+		return fmt.Errorf("saving rich list to staging collection: %w", err)
 	}
 
 	// Built after the insert, which is cheaper than maintaining it while writing half a million
@@ -228,7 +227,7 @@ func ReplaceRichList(ctx context.Context, dbClient *mongo.Client, database strin
 		Keys: bson.D{{Key: "rank", Value: 1}},
 	})
 	if err != nil {
-		return errors.Wrap(err, "creating rich list rank index")
+		return fmt.Errorf("creating rich list rank index: %w", err)
 	}
 
 	err = dbClient.Database("admin").RunCommand(ctx, bson.D{
@@ -237,7 +236,7 @@ func ReplaceRichList(ctx context.Context, dbClient *mongo.Client, database strin
 		{Key: "dropTarget", Value: true},
 	}).Err()
 	if err != nil {
-		return errors.Wrap(err, "renaming rich list staging collection")
+		return fmt.Errorf("renaming rich list staging collection: %w", err)
 	}
 
 	println("Done.")
