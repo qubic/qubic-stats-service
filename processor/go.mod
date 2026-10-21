@@ -18,9 +18,9 @@ require (
 )
 
 require (
-	github.com/bits-and-blooms/bitset v1.24.4 // indirect
+	github.com/bits-and-blooms/bitset v1.26.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
-	github.com/consensys/gnark-crypto v0.20.1 // indirect
+	github.com/consensys/gnark-crypto v0.22.0 // indirect
 	github.com/google/gnostic v0.7.1 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
@@ -28,7 +28,7 @@ require (
 	github.com/linckode/circl v1.3.72 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/qubic/go-schnorrq v1.1.3 // indirect
+	github.com/qubic/go-schnorrq v1.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.2.0 // indirect
