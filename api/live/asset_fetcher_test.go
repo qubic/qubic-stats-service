@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	qubic "github.com/qubic/go-node-connector"
+	qubic "github.com/qubic/go-node-connector/v2"
 	"github.com/stretchr/testify/assert"
 )
 

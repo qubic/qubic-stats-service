@@ -10,8 +10,8 @@ import (
 
 	"github.com/ardanlabs/conf"
 	"github.com/jellydator/ttlcache/v3"
-	qubic "github.com/qubic/go-node-connector"
-	"github.com/qubic/go-node-connector/types"
+	qubic "github.com/qubic/go-node-connector/v2"
+	"github.com/qubic/go-node-connector/v2/types"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/live"
 	"github.com/qubic/qubic-stats-api/rpc"

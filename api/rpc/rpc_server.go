@@ -10,7 +10,7 @@ import (
 	"regexp"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/qubic/go-node-connector/types"
+	"github.com/qubic/go-node-connector/v2/types"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/protobuff"
 	"go.mongodb.org/mongo-driver/v2/bson"

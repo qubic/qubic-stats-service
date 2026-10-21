@@ -4,13 +4,13 @@ go 1.26.10
 
 require (
 	github.com/ardanlabs/conf v1.5.0
-	github.com/qubic/archive-query-service/legacy v0.0.0-20260907065350-e6f1aa4a7a31
-	github.com/qubic/go-node-connector v0.17.0
-	github.com/qubic/qubic-http v0.11.1
+	github.com/qubic/archive-query-service/legacy v0.0.0-20261021133424-3f58e5fee106
+	github.com/qubic/qubic-http v0.12.0
 	google.golang.org/grpc v1.84.0
 )
 
 require (
+	github.com/qubic/go-node-connector/v2 v2.4.0
 	github.com/schollz/progressbar/v3 v3.19.1
 	github.com/stretchr/testify v1.12.1
 	go.mongodb.org/mongo-driver/v2 v2.9.2
@@ -19,15 +19,14 @@ require (
 
 require (
 	github.com/bits-and-blooms/bitset v1.26.0 // indirect
-	github.com/cloudflare/circl v1.6.3 // indirect
+	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/consensys/gnark-crypto v0.22.0 // indirect
 	github.com/google/gnostic v0.7.1 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.32.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/linckode/circl v1.3.72 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/qubic/go-schnorrq v1.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
@@ -40,7 +39,7 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261012220534-4341edf3f941 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )
