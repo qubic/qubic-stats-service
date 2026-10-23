@@ -6,7 +6,7 @@ require (
 	github.com/ardanlabs/conf v1.5.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.32.0
 	github.com/jellydator/ttlcache/v3 v3.4.1
-	github.com/qubic/go-node-connector v0.17.0
+	github.com/qubic/go-node-connector/v2 v2.4.0
 	github.com/stretchr/testify v1.12.1
 	go.mongodb.org/mongo-driver/v2 v2.9.2
 	google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b
@@ -16,11 +16,10 @@ require (
 
 require (
 	github.com/bits-and-blooms/bitset v1.26.0 // indirect
-	github.com/cloudflare/circl v1.6.3 // indirect
+	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/consensys/gnark-crypto v0.22.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/linckode/circl v1.3.72 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/qubic/go-schnorrq v1.2.0 // indirect
 	github.com/silenceper/pool v1.0.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
