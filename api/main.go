@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -9,9 +10,8 @@ import (
 
 	"github.com/ardanlabs/conf"
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pkg/errors"
-	qubic "github.com/qubic/go-node-connector"
-	"github.com/qubic/go-node-connector/types"
+	qubic "github.com/qubic/go-node-connector/v2"
+	"github.com/qubic/go-node-connector/v2/types"
 	"github.com/qubic/qubic-stats-api/cache"
 	"github.com/qubic/qubic-stats-api/live"
 	"github.com/qubic/qubic-stats-api/rpc"
@@ -70,24 +70,24 @@ func run() error {
 		case errors.Is(err, conf.ErrHelpWanted):
 			usage, err := conf.Usage(prefix, &config)
 			if err != nil {
-				return errors.Wrap(err, "generating config usage")
+				return fmt.Errorf("generating config usage: %w", err)
 			}
 			fmt.Println(usage)
 			return nil
 		case errors.Is(err, conf.ErrVersionWanted):
 			version, err := conf.VersionString(prefix, &config)
 			if err != nil {
-				return errors.Wrap(err, "generating config version")
+				return fmt.Errorf("generating config version: %w", err)
 			}
 			fmt.Println(version)
 			return nil
 		}
-		return errors.Wrap(err, "parsing config")
+		return fmt.Errorf("parsing config: %w", err)
 	}
 
 	out, err := conf.String(&config)
 	if err != nil {
-		return errors.Wrap(err, "generating config for output")
+		return fmt.Errorf("generating config for output: %w", err)
 	}
 	log.Printf("main: Config :\n%v\n", out)
 
@@ -104,7 +104,7 @@ func run() error {
 
 	dbClient, err := createMongoClient(&mongoConnection)
 	if err != nil {
-		return errors.Wrap(err, "creating database client")
+		return fmt.Errorf("creating database client: %w", err)
 	}
 
 	defer func() {
@@ -140,7 +140,7 @@ func run() error {
 		NodePort:           config.Pool.NodePort,
 	})
 	if err != nil {
-		return errors.Wrap(err, "creating qubic pool")
+		return fmt.Errorf("creating qubic pool: %w", err)
 	}
 	log.Print("Created qubic node pool.")
 	assetOwnersCache := ttlcache.New[string, *types.AssetOwnerships](
@@ -167,7 +167,7 @@ func run() error {
 	)
 	err = server.Start()
 	if err != nil {
-		return errors.Wrap(err, "starting the web server")
+		return fmt.Errorf("starting the web server: %w", err)
 	}
 	log.Print("Started web server.")
 
@@ -195,7 +195,7 @@ func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error)
 	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi).SetTimeout(configuration.Timeout)
 	client, err := mongo.Connect(opts)
 	if err != nil {
-		return nil, errors.Wrap(err, "creating database client")
+		return nil, fmt.Errorf("creating database client: %w", err)
 	}
 
 	return client, nil

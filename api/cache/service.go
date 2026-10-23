@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -104,7 +103,7 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 		println("Updated Qubic data")
 		qubicData, err = s.fetchQubicData(ctx)
 		if err != nil {
-			return errors.Wrap(err, "fetching qubic data")
+			return fmt.Errorf("fetching qubic data: %w", err)
 		}
 	}
 
@@ -112,7 +111,7 @@ func (s *Service) updateCache(updateSpectrumData bool, updateQubicData bool) err
 		spectrumData, err = s.fetchSpectrumData(ctx)
 		println("Updated spectrum data")
 		if err != nil {
-			return errors.Wrap(err, "fetching spectrum data")
+			return fmt.Errorf("fetching spectrum data: %w", err)
 		}
 	}
 
@@ -131,7 +130,7 @@ func (s *Service) fetchSpectrumData(ctx context.Context) (SpectrumData, error) {
 	result := collection.FindOne(ctx, bson.D{}, opts)
 	err := result.Decode(&spectrumData)
 	if err != nil {
-		return SpectrumData{}, errors.Wrap(err, "decoding database response")
+		return SpectrumData{}, fmt.Errorf("decoding database response: %w", err)
 	}
 
 	return spectrumData, nil
@@ -147,7 +146,7 @@ func (s *Service) fetchQubicData(ctx context.Context) (QubicData, error) {
 	result := collection.FindOne(ctx, bson.D{}, opts)
 	err := result.Decode(&qubicData)
 	if err != nil {
-		return QubicData{}, errors.Wrap(err, "decoding database response")
+		return QubicData{}, fmt.Errorf("decoding database response: %w", err)
 	}
 
 	return qubicData, nil

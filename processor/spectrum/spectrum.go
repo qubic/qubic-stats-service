@@ -10,8 +10,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pkg/errors"
-	"github.com/qubic/go-node-connector/types"
+	"github.com/qubic/go-node-connector/v2/types"
 	"github.com/schollz/progressbar/v3"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -48,7 +47,7 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 		_ = bar.Add(1)
 		entityBalance, err := entity.GetBalance()
 		if err != nil {
-			return nil, errors.Wrapf(err, "getting balance of entity #%d", index)
+			return nil, fmt.Errorf("getting balance of entity #%d: %w", index, err)
 		}
 		circulatingSupply += entityBalance
 
@@ -58,7 +57,7 @@ func CalculateSpectrumData(spectrum *Spectrum) (*Results, error) {
 			var identity types.Identity
 			identity, err := identity.FromPubKey(entity.publicKey, false)
 			if err != nil {
-				return nil, errors.Wrap(err, "getting identity for spectrum entity")
+				return nil, fmt.Errorf("getting identity for spectrum entity: %w", err)
 			}
 
 			richListEntity := RichListEntity{
@@ -94,7 +93,7 @@ func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
 
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, errors.Wrap(err, "reading spectrum file")
+		return nil, fmt.Errorf("reading spectrum file: %w", err)
 	}
 
 	spectrumFileLength := len(fileData)
@@ -121,7 +120,7 @@ func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
 		var entity Entity
 		err := entity.UnmarshallFromBinary(reader)
 		if err != nil {
-			return nil, errors.Wrapf(err, "deserializing %dth spectrum entity", index)
+			return nil, fmt.Errorf("deserializing %dth spectrum entity: %w", index, err)
 		}
 
 		if entity.publicKey != EmptyAddress {
@@ -139,14 +138,14 @@ func ReadSpectrumFromFile(filePath string) (*Spectrum, error) {
 
 	data, err := os.ReadFile(spectrumDataFile)
 	if err != nil {
-		return nil, errors.Wrap(err, "loading spectrum data file")
+		return nil, fmt.Errorf("loading spectrum data file: %w", err)
 	}
 
 	var spectrumData Data
 
 	err = json.Unmarshal(data, &spectrumData)
 	if err != nil {
-		return nil, errors.Wrap(err, "unmarshalling spectrum data from json")
+		return nil, fmt.Errorf("unmarshalling spectrum data from json: %w", err)
 	}
 
 	println("Spectrum data loaded.")
@@ -163,18 +162,18 @@ func (d *Data) SaveSpectrumDataToFile(spectrumDataFile string) error {
 
 	data, err := json.Marshal(d)
 	if err != nil {
-		return errors.Wrap(err, "marshalling spectrum data to json")
+		return fmt.Errorf("marshalling spectrum data to json: %w", err)
 	}
 
 	_ = os.Remove(spectrumDataFile) // Ignore error on purpose
 
 	file, err := os.Create(spectrumDataFile)
 	if err != nil {
-		return errors.Wrap(err, "creating spectrum data file")
+		return fmt.Errorf("creating spectrum data file: %w", err)
 	}
 	_, err = file.Write(data)
 	if err != nil {
-		return errors.Wrap(err, "saving to spectrum data file")
+		return fmt.Errorf("saving to spectrum data file: %w", err)
 	}
 
 	return nil
@@ -189,7 +188,7 @@ func LoadSpectrumDataFromDatabase(ctx context.Context, dbClient *mongo.Client, d
 
 	cursor, err := collection.Find(ctx, bson.D{})
 	if err != nil {
-		return nil, errors.Wrap(err, "getting spectrum data from database")
+		return nil, fmt.Errorf("getting spectrum data from database: %w", err)
 	}
 
 	var results []Data
@@ -197,7 +196,7 @@ func LoadSpectrumDataFromDatabase(ctx context.Context, dbClient *mongo.Client, d
 	var latestTimestamp int64
 
 	if err = cursor.All(ctx, &results); err != nil {
-		return nil, errors.Wrap(err, "getting spectrum data from cursor")
+		return nil, fmt.Errorf("getting spectrum data from cursor: %w", err)
 	}
 
 	for _, data := range results {
@@ -220,7 +219,7 @@ func (d *Data) SaveSpectrumDataToDatabase(ctx context.Context, dbClient *mongo.C
 
 	_, err := collection.InsertOne(ctx, d)
 	if err != nil {
-		return errors.Wrap(err, "saving spectrum data to database")
+		return fmt.Errorf("saving spectrum data to database: %w", err)
 	}
 
 	println("Done.")
@@ -240,7 +239,7 @@ func SaveRichListToDatabase(ctx context.Context, dbClient *mongo.Client, databas
 
 	_, err := collection.InsertMany(ctx, list)
 	if err != nil {
-		return errors.Wrap(err, "saving rich list to database")
+		return fmt.Errorf("saving rich list to database: %w", err)
 	}
 
 	println("Done.")

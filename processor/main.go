@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf"
-	"github.com/pkg/errors"
 	"github.com/qubic/qubic-stats-processor/service"
 	"github.com/qubic/qubic-stats-processor/spectrum"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -90,29 +90,29 @@ func run() error {
 		case conf.ErrHelpWanted:
 			usage, err := conf.Usage(prefix, &config)
 			if err != nil {
-				return errors.Wrap(err, "generating config usage")
+				return fmt.Errorf("generating config usage: %w", err)
 			}
 			fmt.Println(usage)
 			return nil
 		case conf.ErrVersionWanted:
 			version, err := conf.VersionString(prefix, &config)
 			if err != nil {
-				return errors.Wrap(err, "generating config version")
+				return fmt.Errorf("generating config version: %w", err)
 			}
 			fmt.Println(version)
 			return nil
 		}
-		return errors.Wrap(err, "parsing config")
+		return fmt.Errorf("parsing config: %w", err)
 	}
 	out, err := conf.String(&config)
 	if err != nil {
-		return errors.Wrap(err, "generating config for output")
+		return fmt.Errorf("generating config for output: %w", err)
 	}
 	log.Printf("main: Config :\n%v\n", out)
 
 	err = validateConfig(&config)
 	if err != nil {
-		return errors.Wrap(err, "failed to validate configuration")
+		return fmt.Errorf("failed to validate configuration: %w", err)
 	}
 
 	switch config.App.Mode {
@@ -130,7 +130,7 @@ func run() error {
 		println("Connecting to database...")
 		client, err := createMongoClient(&mongoConnection)
 		if err != nil {
-			return errors.Wrap(err, "connecting to database")
+			return fmt.Errorf("connecting to database: %w", err)
 		}
 
 		defer func() {
@@ -155,7 +155,7 @@ func run() error {
 
 		err = s.RunService()
 		if err != nil {
-			return errors.Wrap(err, "running the web service")
+			return fmt.Errorf("running the web service: %w", err)
 		}
 
 		break
@@ -167,7 +167,7 @@ func run() error {
 
 		s, err := spectrum.ReadSpectrumFromFile(config.SpectrumParser.SpectrumFile)
 		if err != nil {
-			return errors.Wrap(err, "loading spectrum from file")
+			return fmt.Errorf("loading spectrum from file: %w", err)
 		}
 
 		//elapsed := time.Since(start)
@@ -176,7 +176,7 @@ func run() error {
 
 		results, err := spectrum.CalculateSpectrumData(s)
 		if err != nil {
-			return errors.Wrap(err, "calculating spectrum data")
+			return fmt.Errorf("calculating spectrum data: %w", err)
 		}
 
 		//elapsed = time.Since(start)
@@ -185,7 +185,7 @@ func run() error {
 		if config.SpectrumParser.OutputMode == "file" {
 			err = results.Data.SaveSpectrumDataToFile(config.SpectrumParser.OutputFile)
 			if err != nil {
-				return errors.Wrap(err, "saving spectrum data")
+				return fmt.Errorf("saving spectrum data: %w", err)
 			}
 			break
 		}
@@ -209,7 +209,7 @@ func run() error {
 		println("Connecting to database...")
 		client, err := createMongoClient(&mongoConnection)
 		if err != nil {
-			return errors.Wrap(err, "connecting to database")
+			return fmt.Errorf("connecting to database: %w", err)
 		}
 
 		defer func() {
@@ -220,7 +220,7 @@ func run() error {
 
 		err = results.Data.SaveSpectrumDataToDatabase(context.Background(), client, config.Mongo.Database, config.Mongo.SpectrumCollection)
 		if err != nil {
-			return errors.Wrap(err, "saving spectrum data")
+			return fmt.Errorf("saving spectrum data: %w", err)
 		}
 
 		err = purgeOldEpochCollections(client, config.Mongo.Database, config.Mongo.RichListCollection)
@@ -278,7 +278,7 @@ func createMongoClient(configuration *MongoConfiguration) (*mongo.Client, error)
 	opts := options.Client().ApplyURI(configuration.AssembleConnectionURI()).SetServerAPIOptions(serverApi)
 	client, err := mongo.Connect(opts)
 	if err != nil {
-		return nil, errors.Wrap(err, "creating database client")
+		return nil, fmt.Errorf("creating database client: %w", err)
 	}
 
 	return client, nil
