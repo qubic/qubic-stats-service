@@ -3,7 +3,7 @@ name: Deploy dev images to GHCR
 on:
   push:
     branches:
-      - 'bugfix/sort-assets'
+      - 'temporary-security-patches'
 
 jobs:
   push-store-image:
@@ -21,7 +21,7 @@ jobs:
 
       - name: 'Build Inventory Image'
         run: |
-          docker build processor --tag ghcr.io/qubic/qubic-stats-processor:snapshot
-          docker push ghcr.io/qubic/qubic-stats-processor:snapshot
-          docker build api --tag ghcr.io/qubic/qubic-stats-api:snapshot
-          docker push ghcr.io/qubic/qubic-stats-api:snapshot
+          docker build processor --tag ghcr.io/qubic/qubic-stats-processor:temporary-security-patches
+          docker push ghcr.io/qubic/qubic-stats-processor:temporary-security-patches
+          docker build api --tag ghcr.io/qubic/qubic-stats-api:temporary-security-patches
+          docker push ghcr.io/qubic/qubic-stats-api:temporary-security-patches
